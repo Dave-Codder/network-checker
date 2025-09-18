@@ -9,7 +9,7 @@ const allowCors = fn => async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-Client-IP'
   );
   if (req.method === 'OPTIONS') {
     res.status(200).end();
@@ -57,20 +57,34 @@ const handler = async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
 
   try {
-    // In production (Vercel), use client's local network info
+    // In production (Vercel or other non-Windows), prefer client-provided local IP
     if (process.platform !== 'win32') {
-      const clientLocalIp = req.headers['x-client-ip'] || 'Not available';
-      
-      // Try to use navigator.connection API data if available
+      const clientLocalIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '').split(',')[0].trim();
+
+      // Derive common local-network values from the provided client IP when possible
+      let ipv4 = clientLocalIp || null;
+      let subnetMask = null;
+      let defaultGateway = null;
+      let dhcpServer = null;
+
+      if (ipv4 && ipv4.includes('.')) {
+        // Use a common /24 default if nothing better
+        subnetMask = '255.255.255.0';
+        const parts = ipv4.split('.');
+        defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
+        dhcpServer = defaultGateway;
+      }
+
       return res.status(200).json({
-        ssid: "Client Network",
-        ipAddress: clientLocalIp,
-        subnetMask: "255.255.255.0", // Default subnet for most local networks
-        defaultGateway: clientLocalIp.split('.').slice(0, 3).concat(['1']).join('.'),
-        dhcpServer: clientLocalIp.split('.').slice(0, 3).concat(['1']).join('.'),
-        leaseObtained: new Date().toISOString(),
-        leaseExpires: new Date(Date.now() + 86400000).toISOString(),
-        timestamp: new Date().toISOString()
+        ssid: null,
+        ipv4: ipv4,
+        subnetMask: subnetMask,
+        leaseObtained: null,
+        leaseExpires: null,
+        defaultGateway: defaultGateway,
+        dhcpServer: dhcpServer,
+        timestamp: new Date().toISOString(),
+        note: 'Client-supplied local network info used in cloud environment'
       });
     }
 
@@ -111,7 +125,7 @@ const handler = async (req, res) => {
     // Parse and combine the results
     const networkInfo = {
       ssid: parseSSID(netshOutput) || null,
-      ipAddress: ipInfo.ipv4 || null,
+      ipv4: ipInfo.ipv4 || null,
       subnetMask: ipInfo.subnetMask || null,
       defaultGateway: ipInfo.defaultGateway || null,
       dhcpServer: ipInfo.dhcpServer || null,
