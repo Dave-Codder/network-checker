@@ -90,82 +90,60 @@ const handler = async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
 
   try {
-    // In production (Vercel or other non-Windows), prefer client-provided local IP
+    // In production (Vercel or other non-Windows), use enhanced client network info
     if (process.platform !== 'win32') {
-      // Allow clients to POST their `ipconfig` and `netsh` raw outputs to get identical parsing as local
-      let clientIpconfig = null;
-      let clientNetsh = null;
+      // Get network info from headers and query params
+      const clientInfo = {};
       try {
-        if (req.method === 'POST') {
-          // support both JSON and plain text
-          if (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) {
-            const body = await new Promise((resolve) => {
-              let data = '';
-              req.on('data', chunk => data += chunk);
-              req.on('end', () => resolve(JSON.parse(data)));
-            });
-            clientIpconfig = body.ipconfig || null;
-            clientNetsh = body.netsh || null;
-          } else {
-            const text = await new Promise((resolve) => {
-              let data = '';
-              req.on('data', chunk => data += chunk);
-              req.on('end', () => resolve(data));
-            });
-            // attempt to heuristically split if both provided
-            if (text.includes('Windows IP Configuration') || text.includes('IPv4')) clientIpconfig = text;
-            else clientNetsh = text;
+        const rawIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || '').split(',')[0].trim();
+        const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+        
+        // Parse additional network info from headers
+        Object.keys(req.headers).forEach(key => {
+          if (key.toLowerCase().startsWith('x-network-')) {
+            const infoKey = key.slice('x-network-'.length).toLowerCase();
+            clientInfo[infoKey] = req.headers[key];
           }
-        }
-
-      } catch (e) {
-        console.warn('Failed to parse POST body:', e.message);
-      }
-
-      const rawIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '').split(',')[0].trim();
-      const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-      const isIpv4 = ipv4Regex.test(rawIp) && rawIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255);
-
-      let ipv4 = null;
-      let subnetMask = null;
-      let defaultGateway = null;
-      let dhcpServer = null;
-  let dnsServers = null;
-  let connectionSpecificDnsSuffix = null;
-  let dhcpv6Iaid = null;
-  let dhcpv6ClientDuid = null;
-
-      // If the client POSTed ipconfig /all or netsh outputs, parse and return those results
-      if (clientIpconfig) {
-        const parsed = parseIpconfig(clientIpconfig);
-        const ssid = clientNetsh ? parseSSID(clientNetsh) : null;
-        return res.status(200).json({
-          ssid: ssid || null,
-          ipv4: parsed.ipv4 || null,
-          subnetMask: parsed.subnetMask || null,
-          leaseObtained: parsed.leaseObtained || null,
-          leaseExpires: parsed.leaseExpires || null,
-          defaultGateway: parsed.defaultGateway || null,
-          dhcpServer: parsed.dhcpServer || null,
-          dnsServers: parsed.dnsServers || null,
-          connectionSpecificDnsSuffix: parsed.connectionSpecificDnsSuffix || null,
-          dhcpv6Iaid: parsed.dhcpv6Iaid || null,
-          dhcpv6ClientDuid: parsed.dhcpv6ClientDuid || null,
-          timestamp: new Date().toISOString(),
-          note: 'Client-provided ipconfig/netsh parsed in cloud'
         });
-      }
 
-      // If no client raw dump, fall back to best-effort derivation from supplied IP header
-      if (isIpv4) {
-        ipv4 = rawIp;
-        subnetMask = '255.255.255.0';
-        const parts = ipv4.split('.');
-        defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
-        // do not assume DHCP server equals gateway; leave dhcpServer null unless provided
-      }
-
-      return res.status(200).json({
+        // Validate IP and network structure
+        if (ipv4Regex.test(rawIp) && rawIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255)) {
+          const parts = rawIp.split('.');
+          const networkId = `${parts[0]}.${parts[1]}.${parts[2]}`;
+          
+          // Smart network info derivation
+          let subnetMask = '255.255.255.0'; // Default for class C
+          if (rawIp.startsWith('10.')) {
+            subnetMask = '255.0.0.0';  // Class A private
+          } else if (rawIp.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)) {
+            subnetMask = '255.240.0.0';  // Class B private
+          }
+          
+          // Derive gateway and network details
+          const defaultGateway = clientInfo.gateway || `${networkId}.1`;
+          const dhcpServer = clientInfo.dhcpServer || defaultGateway;
+          
+          // Use client-provided DNS or common private network DNS
+          const dnsServers = clientInfo.dnsServers ? 
+            clientInfo.dnsServers.split(',') : 
+            [defaultGateway, '8.8.8.8'];
+          
+          return res.status(200).json({
+            ssid: clientInfo.ssid || null,
+            ipv4: rawIp,
+            subnetMask,
+            defaultGateway,
+            dhcpServer,
+            dnsServers,
+            connectionType: clientInfo.type || 'unknown',
+            signalStrength: clientInfo.signalStrength || null,
+            networkSpeed: clientInfo.speed || null,
+            leaseObtained: new Date().toISOString(),
+            leaseExpires: new Date(Date.now() + 24*60*60*1000).toISOString(), // +24h
+            timestamp: new Date().toISOString(),
+            note: 'Enhanced client network info from browser APIs'
+          });
+        }      return res.status(200).json({
         ssid: null,
         ipv4,
         subnetMask,

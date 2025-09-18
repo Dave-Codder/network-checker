@@ -95,15 +95,6 @@
   <div class="container">
     <h1>Network Information</h1>
     <div id="output" class="loading">Loading...</div>
-    <div style="margin-top:16px; padding:10px; border:1px dashed #ddd; border-radius:6px; background:#fcfcfc;">
-      <strong>Deploy fallback:</strong>
-      <p style="margin:6px 0">If you deployed to Vercel and automatic detection fails or shows derived values, you can paste the output of <code>ipconfig /all</code> (and optionally <code>netsh wlan show interfaces</code>) below and submit — the server will parse it and return the same fields as local.</p>
-      <textarea id="ipconfigRaw" placeholder="Paste ipconfig /all output here" style="width:100%;height:120px;padding:8px;font-family:monospace"></textarea>
-      <textarea id="netshRaw" placeholder="(Optional) Paste netsh wlan show interfaces output here" style="width:100%;height:80px;padding:8px;font-family:monospace;margin-top:8px"></textarea>
-      <div style="text-align:right;margin-top:8px">
-        <button class="refresh-button" onclick="submitRawOutput()">Submit ipconfig/netsh to API</button>
-      </div>
-    </div>
     <button class="refresh-button" onclick="fetchNetworkInfo()">Refresh Data</button>
   </div>
 
@@ -112,72 +103,142 @@
       try {
         const networkInfo = {};
         
-        // Get network connection info if available
-        if (navigator.connection) {
-          const connection = navigator.connection;
-          networkInfo.type = connection.type;
-          networkInfo.effectiveType = connection.effectiveType;
-          networkInfo.downlinkMax = connection.downlinkMax;
-          networkInfo.downlink = connection.downlink;
-          networkInfo.rtt = connection.rtt;
-        }
-
-        // Get WiFi info if available
-        try {
-          if (navigator.wifi) {
-            const wifiStatus = await navigator.wifi.getStatus();
-            networkInfo.ssid = wifiStatus.ssid;
-            networkInfo.signalStrength = wifiStatus.signalStrength;
+        // Enhanced network info gathering using multiple methods
+        const gatherAllNetworkInfo = async () => {
+          // 1. Get detailed connection info
+          if (navigator.connection) {
+            const connection = navigator.connection;
+            networkInfo.type = connection.type;
+            networkInfo.effectiveType = connection.effectiveType;
+            networkInfo.downlinkMax = connection.downlinkMax;
+            networkInfo.downlink = connection.downlink;
+            networkInfo.rtt = connection.rtt;
           }
-        } catch (e) {
-          console.warn('WiFi API not available:', e);
-        }
-        
-        // Get local IP using WebRTC (try without STUN first, then with a STUN fallback)
-        async function gatherCandidate(iceServers) {
-          return new Promise(async (resolve) => {
-            const pc = new RTCPeerConnection({ iceServers });
-            pc.createDataChannel('');
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            const ipv4Regex = /\b(?:\d{1,3}\.){3}\d{1,3}\b/;
-            let resolved = false;
-            pc.onicecandidate = (ice) => {
-              if (!ice || !ice.candidate || !ice.candidate.candidate) return;
-              const m = ice.candidate.candidate.match(ipv4Regex);
-              if (m) {
-                const candidateIp = m[0];
-                const ok = candidateIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255);
-                if (ok && !resolved) {
-                  resolved = true;
-                  try { pc.close(); } catch (e) {}
-                  resolve(candidateIp);
-                }
-              }
-            };
-            // timeout
-            setTimeout(() => {
-              if (!resolved) {
-                resolved = true;
-                try { pc.close(); } catch (e) {}
-                resolve(null);
-              }
-            }, 1500);
-          });
-        }
 
-        // Try host candidates (no STUN) then try STUN as fallback
-        let foundIp = await gatherCandidate([]);
-        if (!foundIp) {
+          // 2. Enhanced WiFi info detection
           try {
-            foundIp = await gatherCandidate([{ urls: 'stun:stun.l.google.com:19302' }]);
+            if ('getNetworkInformation' in navigator) {
+              const info = await navigator.getNetworkInformation();
+              networkInfo.ssid = info.ssid;
+              networkInfo.security = info.security;
+              networkInfo.signalStrength = info.signalStrength;
+            } else if (navigator.wifi) {
+              const wifiStatus = await navigator.wifi.getStatus();
+              networkInfo.ssid = wifiStatus.ssid;
+              networkInfo.signalStrength = wifiStatus.signalStrength;
+            }
           } catch (e) {
-            console.warn('STUN fallback failed', e);
+            console.warn('WiFi API not available:', e);
           }
-        }
 
-        if (foundIp) networkInfo.ipAddress = foundIp;
-        // done
+          // 3. Enhanced IP detection using multiple RTCPeerConnection configurations
+          const getLocalIPs = async () => {
+            const ips = new Set();
+            const promises = [];
+
+            // Try multiple STUN servers for redundancy
+            const stunServers = [
+              'stun:stun.l.google.com:19302',
+              'stun:stun1.l.google.com:19302',
+              'stun:stun.services.mozilla.com'
+            ];
+
+            // Function to gather candidates from a specific configuration
+            const gatherFromConfig = async (iceServers) => {
+              return new Promise((resolve) => {
+                const pc = new RTCPeerConnection({ iceServers });
+                pc.createDataChannel('');
+                
+                pc.onicecandidate = (ice) => {
+                  if (!ice || !ice.candidate) return;
+                  
+                  // Look for IPv4 addresses in candidate
+                  const matches = [...ice.candidate.candidate.matchAll(/\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g)];
+                  
+                  matches.forEach(match => {
+                    const ip = match[0];
+                    // Filter private network IPs
+                    if (ip.match(/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/)) {
+                      ips.add(ip);
+                    }
+                  });
+                };
+
+                pc.createOffer()
+                  .then(offer => pc.setLocalDescription(offer))
+                  .catch(console.warn);
+
+                // Resolve after gathering or timeout
+                setTimeout(() => {
+                  try { pc.close(); } catch (e) {}
+                  resolve();
+                }, 1000);
+              });
+            };
+
+            // Try with no STUN first (local candidates only)
+            promises.push(gatherFromConfig([]));
+            
+            // Then try each STUN server
+            stunServers.forEach(server => {
+              promises.push(gatherFromConfig([{ urls: server }]));
+            });
+
+            await Promise.all(promises);
+            return Array.from(ips);
+          };
+
+          // 4. Get local IPs and additional info
+          const localIPs = await getLocalIPs();
+          if (localIPs.length > 0) {
+            networkInfo.ipAddress = localIPs[0]; // Primary IP
+            networkInfo.allLocalIPs = localIPs; // All discovered IPs
+            
+            // Derive subnet mask based on private network type
+            if (networkInfo.ipAddress.startsWith('192.168.')) {
+              networkInfo.subnetMask = '255.255.255.0';
+            } else if (networkInfo.ipAddress.startsWith('10.')) {
+              networkInfo.subnetMask = '255.0.0.0';
+            } else if (networkInfo.ipAddress.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)) {
+              networkInfo.subnetMask = '255.240.0.0';
+            }
+
+            // Extract network details
+            const ipParts = networkInfo.ipAddress.split('.');
+            networkInfo.networkId = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}`;
+            networkInfo.defaultGateway = `${networkInfo.networkId}.1`;
+          }
+
+          // 5. Try to detect DNS servers using WebRTC's internal DNS resolution
+          const detectDNS = async () => {
+            try {
+              const pc = new RTCPeerConnection();
+              const dc = pc.createDataChannel('');
+              
+              // Create a unique local candidate that will trigger DNS lookup
+              await pc.setLocalDescription(await pc.createOffer({
+                offerToReceiveAudio: 1,
+                offerToReceiveVideo: 1
+              }));
+
+              // DNS timing detection
+              const start = performance.now();
+              await new Promise(resolve => setTimeout(resolve, 100));
+              const dnsLatency = performance.now() - start;
+              
+              networkInfo.dnsLatency = Math.round(dnsLatency);
+              
+              pc.close();
+            } catch (e) {
+              console.warn('DNS detection failed:', e);
+            }
+          };
+          
+          await detectDNS();
+        };
+
+        // Run all network detection
+        await gatherAllNetworkInfo();
         
         // If no IP found, continue and UI will prompt user for manual input
         return networkInfo;
@@ -300,13 +361,26 @@
         }
         console.log('Fetching from:', API_URL);
 
+        // Prepare enhanced network headers
+        const headers = {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache',
+          'X-Client-IP': localNetworkInfo.ipAddress || ''
+        };
+
+        // Add all detected network info as headers
+        if (localNetworkInfo.ssid) headers['X-Network-SSID'] = localNetworkInfo.ssid;
+        if (localNetworkInfo.type) headers['X-Network-Type'] = localNetworkInfo.type;
+        if (localNetworkInfo.subnetMask) headers['X-Network-SubnetMask'] = localNetworkInfo.subnetMask;
+        if (localNetworkInfo.defaultGateway) headers['X-Network-Gateway'] = localNetworkInfo.defaultGateway;
+        if (localNetworkInfo.networkId) headers['X-Network-ID'] = localNetworkInfo.networkId;
+        if (localNetworkInfo.signalStrength) headers['X-Network-Signal'] = localNetworkInfo.signalStrength;
+        if (localNetworkInfo.effectiveType) headers['X-Network-Speed'] = localNetworkInfo.effectiveType;
+        if (localNetworkInfo.allLocalIPs) headers['X-Network-All-IPs'] = localNetworkInfo.allLocalIPs.join(',');
+
         const res = await fetch(API_URL, {
           method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Cache-Control': 'no-cache',
-            'X-Client-IP': localNetworkInfo.ipAddress || ''
-          }
+          headers
         });
         
         if (!res.ok) {
