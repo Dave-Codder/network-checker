@@ -102,75 +102,39 @@
     function createNetworkTable(data) {
       const container = document.createElement('div');
       
-      // IP Address Section
-      const ipTable = document.createElement('table');
-      ipTable.className = 'network-table';
-      const ipRow = ipTable.insertRow();
-      ipRow.insertCell(0).outerHTML = '<th>Your IP Address</th>';
-      ipRow.insertCell(1).textContent = data.ipAddress;
-      container.appendChild(ipTable);
+      // Network Information Table
+      const networkTable = document.createElement('table');
+      networkTable.className = 'network-table';
+      container.appendChild(networkTable);
 
-      // Location Information
-      if (data.geo) {
-        const geoTitle = document.createElement('h3');
-        geoTitle.textContent = 'Location Information';
-        geoTitle.style.marginTop = '20px';
-        container.appendChild(geoTitle);
-
-        const geoTable = document.createElement('table');
-        geoTable.className = 'network-table';
-        
-        const geoFields = [
-          { key: 'country', label: 'Country' },
-          { key: 'region', label: 'Region' },
-          { key: 'city', label: 'City' }
-        ];
-
-        geoFields.forEach(({ key, label }) => {
-          if (data.geo[key]) {
-            const row = geoTable.insertRow();
-            row.insertCell(0).outerHTML = `<th>${label}</th>`;
-            row.insertCell(1).textContent = data.geo[key];
-          }
-        });
-
-        container.appendChild(geoTable);
-      }
-
-      // Connection Information
-      const connTitle = document.createElement('h3');
-      connTitle.textContent = 'Connection Details';
-      connTitle.style.marginTop = '20px';
-      container.appendChild(connTitle);
-
-      const connTable = document.createElement('table');
-      connTable.className = 'network-table';
-      
-      const connFields = [
-        { path: ['connectionInfo', 'protocol'], label: 'Protocol' },
-        { path: ['connectionInfo', 'type'], label: 'Connection Type' },
-        { path: ['connectionInfo', 'host'], label: 'Host' },
-        { path: ['headers', 'language'], label: 'Language' }
+      // Define the fields to display
+      const networkFields = [
+        { key: 'ssid', label: 'WiFi Network (SSID)' },
+        { key: 'ipAddress', label: 'IP Address' },
+        { key: 'subnetMask', label: 'Subnet Mask' },
+        { key: 'defaultGateway', label: 'Default Gateway' },
+        { key: 'dhcpServer', label: 'DHCP Server' },
+        { key: 'leaseObtained', label: 'Lease Obtained' },
+        { key: 'leaseExpires', label: 'Lease Expires' }
       ];
 
-      connFields.forEach(({ path, label }) => {
-        const value = path.reduce((obj, key) => obj && obj[key], data);
-        if (value) {
-          const row = connTable.insertRow();
+      // Add each field to the table
+      networkFields.forEach(({ key, label }) => {
+        if (data[key] !== undefined && data[key] !== null) {
+          const row = networkTable.insertRow();
           row.insertCell(0).outerHTML = `<th>${label}</th>`;
-          row.insertCell(1).textContent = value;
+          row.insertCell(1).textContent = data[key];
         }
       });
 
-      container.appendChild(connTable);
-
-      // Timestamp
-      const timestamp = document.createElement('div');
-      timestamp.style.marginTop = '20px';
-      timestamp.style.textAlign = 'right';
-      timestamp.style.color = '#666';
-      timestamp.style.fontSize = '12px';
-      timestamp.textContent = 'Last updated: ' + new Date(data.clientInfo.timestamp).toLocaleString();
+      // Add timestamp if available
+      if (data.timestamp) {
+        const timestamp = document.createElement('div');
+        timestamp.style.marginTop = '20px';
+        timestamp.style.textAlign = 'right';
+        timestamp.style.color = '#666';
+        timestamp.style.fontSize = '12px';
+        timestamp.textContent = 'Last updated: ' + new Date(data.timestamp).toLocaleString();
       container.appendChild(timestamp);
 
       return container;
@@ -182,11 +146,10 @@
         output.className = 'loading';
         output.textContent = 'Loading...';
         
-        const API_URL = window.location.hostname === 'localhost' 
-          ? 'http://localhost:5000/api/network'
-          : '/api/network';
-          
-        console.log('Fetching from:', API_URL); // Debug log
+        // Determine API URL based on environment
+        const baseURL = window.location.port === '5500' ? 'http://localhost:3000' : '';
+        const API_URL = `${baseURL}/api/network`;
+        console.log('Fetching from:', API_URL);
         
         const res = await fetch(API_URL, {
           method: 'GET',
