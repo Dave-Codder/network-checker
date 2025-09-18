@@ -99,6 +99,55 @@
   </div>
 
   <script>
+    async function getLocalNetworkInfo() {
+      try {
+        const networkInfo = {};
+        
+        // Get network connection info if available
+        if (navigator.connection) {
+          const connection = navigator.connection;
+          networkInfo.type = connection.type;
+          networkInfo.effectiveType = connection.effectiveType;
+          networkInfo.downlinkMax = connection.downlinkMax;
+          networkInfo.downlink = connection.downlink;
+          networkInfo.rtt = connection.rtt;
+        }
+
+        // Get WiFi info if available
+        try {
+          if (navigator.wifi) {
+            const wifiStatus = await navigator.wifi.getStatus();
+            networkInfo.ssid = wifiStatus.ssid;
+            networkInfo.signalStrength = wifiStatus.signalStrength;
+          }
+        } catch (e) {
+          console.warn('WiFi API not available:', e);
+        }
+        
+        // Get local IP using WebRTC
+        const pc = new RTCPeerConnection({ iceServers: [] });
+        pc.createDataChannel('');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        
+        return new Promise((resolve) => {
+          pc.onicecandidate = (ice) => {
+            if (!ice || !ice.candidate || !ice.candidate.candidate) return;
+            
+            const localIP = ice.candidate.candidate.split(' ')[4];
+            if (localIP.includes('.')) {
+              networkInfo.ipAddress = localIP;
+              pc.close();
+              resolve(networkInfo);
+            }
+          };
+        });
+      } catch (error) {
+        console.error('Error getting local network info:', error);
+        return {};
+      }
+    }
+
     function createNetworkTable(data) {
       const container = document.createElement('div');
       
@@ -109,13 +158,11 @@
 
       // Define the fields to display
       const networkFields = [
-        { key: 'environment', label: 'Environment' },
         { key: 'ssid', label: 'Network Name' },
         { key: 'ipAddress', label: 'IP Address' },
         { key: 'subnetMask', label: 'Subnet Mask' },
         { key: 'defaultGateway', label: 'Default Gateway' },
         { key: 'dhcpServer', label: 'DHCP Server' },
-        { key: 'region', label: 'Region' },
         { key: 'leaseObtained', label: 'Lease Obtained' },
         { key: 'leaseExpires', label: 'Lease Expires' }
       ];
@@ -151,6 +198,9 @@
         output.className = 'loading';
         output.textContent = 'Loading...';
         
+        // Get local network info first
+        const localNetworkInfo = await getLocalNetworkInfo();
+        
         // Determine API URL based on environment
         if (window.location.hostname === 'localhost') {
           API_URL = 'http://localhost:3000/api/network';
@@ -163,7 +213,8 @@
           method: 'GET',
           headers: {
             'Accept': 'application/json',
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache',
+            'X-Client-IP': localNetworkInfo.ipAddress || ''
           }
         });
         
