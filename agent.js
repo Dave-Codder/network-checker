@@ -1,16 +1,11 @@
 // agent.js
+const express = require("express");
 const { exec } = require("child_process");
+const cors = require("cors");
+const os = require("os");
 
-// Sample data for Vercel deployment since we can't run Windows commands
-const sampleData = {
-  ipv4: "192.168.1.100",
-  subnetMask: "255.255.255.0",
-  defaultGateway: "192.168.1.1",
-  dhcpServer: "192.168.1.1",
-  ssid: "Sample-Network",
-  leaseObtained: "September 18, 2025 10:00:00 AM",
-  leaseExpires: "September 19, 2025 10:00:00 AM"
-};
+const app = express();
+app.use(cors());
 
 function parseIpconfig(output) {
   // ambil IPv4, Subnet Mask, Lease Obtained/Expires, Default Gateway, DHCP Server
@@ -46,37 +41,79 @@ function parseSSID(netshOutput) {
   return null;
 }
 
-module.exports = async (req, res) => {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET');
+// Get network interfaces information using 'os' module
+function getNetworkInterfaces() {
+  const interfaces = os.networkInterfaces();
+  const results = [];
   
-  if (process.env.VERCEL) {
-    // When running on Vercel, return sample data
-    res.json(sampleData);
-    return;
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    for (const addr of addrs) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        results.push({
+          interface: name,
+          ipv4: addr.address,
+          subnetMask: addr.netmask,
+          mac: addr.mac
+        });
+      }
+    }
   }
+  return results;
+}
 
-  // For local development, use actual system commands
+app.get("/network", async (req, res) => {
   try {
-    const [netshStdout, ipStdout] = await Promise.all([
-      new Promise((resolve) => {
-        exec("netsh wlan show interfaces", (err, stdout) => {
-          resolve(err ? "" : stdout);
-        });
-      }),
-      new Promise((resolve, reject) => {
-        exec("ipconfig /all", (err, stdout) => {
-          if (err) reject(new Error("Failed to run ipconfig"));
-          resolve(stdout);
-        });
-      })
-    ]);
+    // Get client's IP address
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    
+    // Get all network interfaces
+    const networkInterfaces = getNetworkInterfaces();
+    
+    let networkData = {
+      clientIp: clientIp,
+      interfaces: networkInterfaces,
+      timestamp: new Date().toISOString()
+    };
 
-    const ssid = parseSSID(netshStdout);
-    const ip = parseIpconfig(ipStdout);
-    res.json({ ssid, ...ip });
+    // If on Windows, try to get additional network information
+    if (process.platform === 'win32') {
+      try {
+        const [netshStdout, ipStdout] = await Promise.all([
+          new Promise((resolve) => {
+            exec("netsh wlan show interfaces", (err, stdout) => {
+              resolve(err ? "" : stdout);
+            });
+          }),
+          new Promise((resolve) => {
+            exec("ipconfig /all", (err, stdout) => {
+              resolve(err ? "" : stdout);
+            });
+          })
+        ]);
+
+        const ssid = parseSSID(netshStdout);
+        const ipConfig = parseIpconfig(ipStdout);
+        
+        networkData = {
+          ...networkData,
+          ssid,
+          ...ipConfig
+        };
+      } catch (err) {
+        console.error('Windows-specific command error:', err);
+      }
+    }
+
+    res.json(networkData);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: "Failed to get network information",
+      message: error.message 
+    });
   }
-};
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Network agent running at http://localhost:${PORT}/network`);
+});
