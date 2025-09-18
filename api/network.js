@@ -6,7 +6,7 @@ const execAsync = promisify(exec);
 const allowCors = fn => async (req, res) => {
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-Client-IP'
@@ -92,6 +92,36 @@ const handler = async (req, res) => {
   try {
     // In production (Vercel or other non-Windows), prefer client-provided local IP
     if (process.platform !== 'win32') {
+      // Allow clients to POST their `ipconfig` and `netsh` raw outputs to get identical parsing as local
+      let clientIpconfig = null;
+      let clientNetsh = null;
+      try {
+        if (req.method === 'POST') {
+          // support both JSON and plain text
+          if (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) {
+            const body = await new Promise((resolve) => {
+              let data = '';
+              req.on('data', chunk => data += chunk);
+              req.on('end', () => resolve(JSON.parse(data)));
+            });
+            clientIpconfig = body.ipconfig || null;
+            clientNetsh = body.netsh || null;
+          } else {
+            const text = await new Promise((resolve) => {
+              let data = '';
+              req.on('data', chunk => data += chunk);
+              req.on('end', () => resolve(data));
+            });
+            // attempt to heuristically split if both provided
+            if (text.includes('Windows IP Configuration') || text.includes('IPv4')) clientIpconfig = text;
+            else clientNetsh = text;
+          }
+        }
+
+      } catch (e) {
+        console.warn('Failed to parse POST body:', e.message);
+      }
+
       const rawIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '').split(',')[0].trim();
       const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
       const isIpv4 = ipv4Regex.test(rawIp) && rawIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255);
@@ -105,12 +135,34 @@ const handler = async (req, res) => {
   let dhcpv6Iaid = null;
   let dhcpv6ClientDuid = null;
 
+      // If the client POSTed ipconfig /all or netsh outputs, parse and return those results
+      if (clientIpconfig) {
+        const parsed = parseIpconfig(clientIpconfig);
+        const ssid = clientNetsh ? parseSSID(clientNetsh) : null;
+        return res.status(200).json({
+          ssid: ssid || null,
+          ipv4: parsed.ipv4 || null,
+          subnetMask: parsed.subnetMask || null,
+          leaseObtained: parsed.leaseObtained || null,
+          leaseExpires: parsed.leaseExpires || null,
+          defaultGateway: parsed.defaultGateway || null,
+          dhcpServer: parsed.dhcpServer || null,
+          dnsServers: parsed.dnsServers || null,
+          connectionSpecificDnsSuffix: parsed.connectionSpecificDnsSuffix || null,
+          dhcpv6Iaid: parsed.dhcpv6Iaid || null,
+          dhcpv6ClientDuid: parsed.dhcpv6ClientDuid || null,
+          timestamp: new Date().toISOString(),
+          note: 'Client-provided ipconfig/netsh parsed in cloud'
+        });
+      }
+
+      // If no client raw dump, fall back to best-effort derivation from supplied IP header
       if (isIpv4) {
         ipv4 = rawIp;
         subnetMask = '255.255.255.0';
         const parts = ipv4.split('.');
         defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
-        dhcpServer = defaultGateway;
+        // do not assume DHCP server equals gateway; leave dhcpServer null unless provided
       }
 
       return res.status(200).json({
@@ -126,7 +178,7 @@ const handler = async (req, res) => {
         dhcpv6Iaid,
         dhcpv6ClientDuid,
         timestamp: new Date().toISOString(),
-        note: isIpv4 ? 'Client-supplied local network info used in cloud environment' : 'No valid client IPv4 provided'
+        note: isIpv4 ? 'Client-supplied local network info used in cloud environment (derived values)' : 'No valid client IPv4 provided'
       });
     }
 

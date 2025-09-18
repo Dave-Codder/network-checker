@@ -95,6 +95,15 @@
   <div class="container">
     <h1>Network Information</h1>
     <div id="output" class="loading">Loading...</div>
+    <div style="margin-top:16px; padding:10px; border:1px dashed #ddd; border-radius:6px; background:#fcfcfc;">
+      <strong>Deploy fallback:</strong>
+      <p style="margin:6px 0">If you deployed to Vercel and automatic detection fails or shows derived values, you can paste the output of <code>ipconfig /all</code> (and optionally <code>netsh wlan show interfaces</code>) below and submit — the server will parse it and return the same fields as local.</p>
+      <textarea id="ipconfigRaw" placeholder="Paste ipconfig /all output here" style="width:100%;height:120px;padding:8px;font-family:monospace"></textarea>
+      <textarea id="netshRaw" placeholder="(Optional) Paste netsh wlan show interfaces output here" style="width:100%;height:80px;padding:8px;font-family:monospace;margin-top:8px"></textarea>
+      <div style="text-align:right;margin-top:8px">
+        <button class="refresh-button" onclick="submitRawOutput()">Submit ipconfig/netsh to API</button>
+      </div>
+    </div>
     <button class="refresh-button" onclick="fetchNetworkInfo()">Refresh Data</button>
   </div>
 
@@ -347,6 +356,37 @@
             'Cache-Control': 'no-cache',
             'X-Client-IP': ip
           }
+        });
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const data = await res.json();
+        output.className = '';
+        output.textContent = '';
+        output.appendChild(createNetworkTable(data));
+      } catch (err) {
+        output.className = 'error';
+        output.textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function submitRawOutput() {
+      const ipconfigRaw = document.getElementById('ipconfigRaw').value.trim();
+      const netshRaw = document.getElementById('netshRaw').value.trim();
+      const output = document.getElementById('output');
+      let API_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000/api/network' : '/api/network';
+      if (!ipconfigRaw) {
+        alert('Please paste the output of ipconfig /all into the first box.');
+        return;
+      }
+      try {
+        output.className = 'loading';
+        output.textContent = 'Submitting and parsing...';
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ ipconfig: ipconfigRaw, netsh: netshRaw })
         });
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         const data = await res.json();
