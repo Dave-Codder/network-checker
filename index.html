@@ -219,22 +219,35 @@
       // Define the fields to display
       const networkFields = [
         { key: 'ssid', label: 'Network Name' },
-        { key: 'ipAddress', label: 'IP Address' },
+        // API returns 'ipv4' but older UI uses 'ipAddress' from local detection. Prefer API value when present.
+        { key: 'ipv4', label: 'IP Address' },
         { key: 'subnetMask', label: 'Subnet Mask' },
         { key: 'defaultGateway', label: 'Default Gateway' },
         { key: 'dhcpServer', label: 'DHCP Server' },
         { key: 'leaseObtained', label: 'Lease Obtained' },
-        { key: 'leaseExpires', label: 'Lease Expires' }
+        { key: 'leaseExpires', label: 'Lease Expires' },
+        { key: 'dhcpv6Iaid', label: 'DHCPv6 IAID' },
+        { key: 'dhcpv6ClientDuid', label: 'DHCPv6 Client DUID' },
+        { key: 'connectionSpecificDnsSuffix', label: 'Connection-specific DNS Suffix' }
       ];
 
       // Add each field to the table
       networkFields.forEach(({ key, label }) => {
-        if (data[key] !== undefined && data[key] !== null) {
+        const value = data[key] !== undefined && data[key] !== null ? data[key] : null;
+        if (value) {
           const row = networkTable.insertRow();
           row.insertCell(0).outerHTML = `<th>${label}</th>`;
-          row.insertCell(1).textContent = data[key];
+          row.insertCell(1).textContent = value;
         }
       });
+
+      // DNS Servers (array) display specially
+      if (Array.isArray(data.dnsServers) && data.dnsServers.length > 0) {
+        const row = networkTable.insertRow();
+        row.insertCell(0).outerHTML = `<th>DNS Servers</th>`;
+        const cell = row.insertCell(1);
+        cell.innerHTML = data.dnsServers.map(s => `<div>${s}</div>`).join('');
+      }
 
       // Add timestamp if available
       if (data.timestamp) {
