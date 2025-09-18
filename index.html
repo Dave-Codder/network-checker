@@ -124,28 +124,88 @@
           console.warn('WiFi API not available:', e);
         }
         
-        // Get local IP using WebRTC
-        const pc = new RTCPeerConnection({ iceServers: [] });
-        pc.createDataChannel('');
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+        // Get local IP using WebRTC (try without STUN first, then with a STUN fallback)
+        async function gatherCandidate(iceServers) {
+          return new Promise(async (resolve) => {
+            const pc = new RTCPeerConnection({ iceServers });
+            pc.createDataChannel('');
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            const ipv4Regex = /\b(?:\d{1,3}\.){3}\d{1,3}\b/;
+            let resolved = false;
+            pc.onicecandidate = (ice) => {
+              if (!ice || !ice.candidate || !ice.candidate.candidate) return;
+              const m = ice.candidate.candidate.match(ipv4Regex);
+              if (m) {
+                const candidateIp = m[0];
+                const ok = candidateIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255);
+                if (ok && !resolved) {
+                  resolved = true;
+                  try { pc.close(); } catch (e) {}
+                  resolve(candidateIp);
+                }
+              }
+            };
+            // timeout
+            setTimeout(() => {
+              if (!resolved) {
+                resolved = true;
+                try { pc.close(); } catch (e) {}
+                resolve(null);
+              }
+            }, 1500);
+          });
+        }
+
+        // Try host candidates (no STUN) then try STUN as fallback
+        let foundIp = await gatherCandidate([]);
+        if (!foundIp) {
+          try {
+            foundIp = await gatherCandidate([{ urls: 'stun:stun.l.google.com:19302' }]);
+          } catch (e) {
+            console.warn('STUN fallback failed', e);
+          }
+        }
+
+        if (foundIp) networkInfo.ipAddress = foundIp;
+        // done
         
-        return new Promise((resolve) => {
-          pc.onicecandidate = (ice) => {
-            if (!ice || !ice.candidate || !ice.candidate.candidate) return;
-            
-            const localIP = ice.candidate.candidate.split(' ')[4];
-            if (localIP.includes('.')) {
-              networkInfo.ipAddress = localIP;
-              pc.close();
-              resolve(networkInfo);
-            }
-          };
-        });
+        // If no IP found, continue and UI will prompt user for manual input
+        return networkInfo;
       } catch (error) {
         console.error('Error getting local network info:', error);
         return {};
       }
+    }
+
+    // Show a manual IP input if automatic detection failed
+    function showManualIpPrompt(currentOutput, onSubmit) {
+      currentOutput.innerHTML = '';
+      const info = document.createElement('div');
+      info.innerHTML = `
+        <p>Automatic local IP detection failed (browser/privacy limits). You can paste your local IP address (e.g. <code>192.168.1.12</code>) here:</p>
+      `;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = '192.168.x.x';
+      input.style.padding = '8px';
+      input.style.width = '60%';
+      input.style.marginRight = '8px';
+      const btn = document.createElement('button');
+      btn.textContent = 'Use this IP';
+      btn.className = 'refresh-button';
+      btn.onclick = () => {
+        const val = input.value.trim();
+        const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+        if (ipv4Regex.test(val) && val.split('.').every(n => Number(n) >= 0 && Number(n) <= 255)) {
+          onSubmit(val);
+        } else {
+          alert('Please enter a valid IPv4 address');
+        }
+      };
+      currentOutput.appendChild(info);
+      currentOutput.appendChild(input);
+      currentOutput.appendChild(btn);
     }
 
     function createNetworkTable(data) {
@@ -200,7 +260,16 @@
         
         // Get local network info first
         const localNetworkInfo = await getLocalNetworkInfo();
-        
+
+        // If we didn't get a local IP, prompt user for manual input
+        if (!localNetworkInfo.ipAddress) {
+          showManualIpPrompt(output, async (manualIp) => {
+            // re-run fetch with manual IP
+            await fetchNetworkInfoWithIp(manualIp);
+          });
+          return;
+        }
+
         // Determine API URL based on environment
         if (window.location.hostname === 'localhost') {
           API_URL = 'http://localhost:3000/api/network';
@@ -208,7 +277,7 @@
           API_URL = '/api/network';
         }
         console.log('Fetching from:', API_URL);
-        
+
         const res = await fetch(API_URL, {
           method: 'GET',
           headers: {
@@ -249,6 +318,31 @@
         } else {
           output.textContent = 'Error: ' + err.message;
         }
+      }
+    }
+
+    async function fetchNetworkInfoWithIp(ip) {
+      const output = document.getElementById('output');
+      let API_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000/api/network' : '/api/network';
+      try {
+        output.className = 'loading';
+        output.textContent = 'Loading...';
+        const res = await fetch(API_URL, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Cache-Control': 'no-cache',
+            'X-Client-IP': ip
+          }
+        });
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const data = await res.json();
+        output.className = '';
+        output.textContent = '';
+        output.appendChild(createNetworkTable(data));
+      } catch (err) {
+        output.className = 'error';
+        output.textContent = 'Error: ' + err.message;
       }
     }
 
