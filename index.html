@@ -143,13 +143,18 @@
 
     async function fetchNetworkInfo() {
       const output = document.getElementById('output');
+      let API_URL = '';
+      
       try {
         output.className = 'loading';
         output.textContent = 'Loading...';
         
         // Determine API URL based on environment
-        const baseURL = window.location.port === '5500' ? 'http://localhost:3000' : '';
-        const API_URL = `${baseURL}/api/network`;
+        if (window.location.hostname === 'localhost') {
+          API_URL = 'http://localhost:3000/api/network';
+        } else {
+          API_URL = '/api/network';
+        }
         console.log('Fetching from:', API_URL);
         
         const res = await fetch(API_URL, {
