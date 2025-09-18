@@ -100,38 +100,80 @@
 
   <script>
     function createNetworkTable(data) {
-      if (data.message) {
-        // Handle Vercel deployment message
-        const message = document.createElement('div');
-        message.className = 'error';
-        message.textContent = data.message;
-        return message;
+      const container = document.createElement('div');
+      
+      // IP Address Section
+      const ipTable = document.createElement('table');
+      ipTable.className = 'network-table';
+      const ipRow = ipTable.insertRow();
+      ipRow.insertCell(0).outerHTML = '<th>Your IP Address</th>';
+      ipRow.insertCell(1).textContent = data.ipAddress;
+      container.appendChild(ipTable);
+
+      // Location Information
+      if (data.geo) {
+        const geoTitle = document.createElement('h3');
+        geoTitle.textContent = 'Location Information';
+        geoTitle.style.marginTop = '20px';
+        container.appendChild(geoTitle);
+
+        const geoTable = document.createElement('table');
+        geoTable.className = 'network-table';
+        
+        const geoFields = [
+          { key: 'country', label: 'Country' },
+          { key: 'region', label: 'Region' },
+          { key: 'city', label: 'City' }
+        ];
+
+        geoFields.forEach(({ key, label }) => {
+          if (data.geo[key]) {
+            const row = geoTable.insertRow();
+            row.insertCell(0).outerHTML = `<th>${label}</th>`;
+            row.insertCell(1).textContent = data.geo[key];
+          }
+        });
+
+        container.appendChild(geoTable);
       }
 
-      const table = document.createElement('table');
-      table.className = 'network-table';
+      // Connection Information
+      const connTitle = document.createElement('h3');
+      connTitle.textContent = 'Connection Details';
+      connTitle.style.marginTop = '20px';
+      container.appendChild(connTitle);
+
+      const connTable = document.createElement('table');
+      connTable.className = 'network-table';
       
-      const fields = [
-        { key: 'ssid', label: 'Wi-Fi Network' },
-        { key: 'ipv4', label: 'IPv4 Address' },
-        { key: 'subnetMask', label: 'Subnet Mask' },
-        { key: 'defaultGateway', label: 'Default Gateway' },
-        { key: 'dhcpServer', label: 'DHCP Server' },
-        { key: 'leaseObtained', label: 'Lease Obtained' },
-        { key: 'leaseExpires', label: 'Lease Expires' }
+      const connFields = [
+        { path: ['connectionInfo', 'protocol'], label: 'Protocol' },
+        { path: ['connectionInfo', 'type'], label: 'Connection Type' },
+        { path: ['connectionInfo', 'host'], label: 'Host' },
+        { path: ['headers', 'language'], label: 'Language' }
       ];
 
-      fields.forEach(({ key, label }) => {
-        if (data[key]) {
-          const row = table.insertRow();
-          const cell1 = row.insertCell(0);
-          const cell2 = row.insertCell(1);
-          cell1.outerHTML = `<th>${label}</th>`;
-          cell2.textContent = data[key];
+      connFields.forEach(({ path, label }) => {
+        const value = path.reduce((obj, key) => obj && obj[key], data);
+        if (value) {
+          const row = connTable.insertRow();
+          row.insertCell(0).outerHTML = `<th>${label}</th>`;
+          row.insertCell(1).textContent = value;
         }
       });
 
-      return table;
+      container.appendChild(connTable);
+
+      // Timestamp
+      const timestamp = document.createElement('div');
+      timestamp.style.marginTop = '20px';
+      timestamp.style.textAlign = 'right';
+      timestamp.style.color = '#666';
+      timestamp.style.fontSize = '12px';
+      timestamp.textContent = 'Last updated: ' + new Date(data.clientInfo.timestamp).toLocaleString();
+      container.appendChild(timestamp);
+
+      return container;
     }
 
     async function fetchNetworkInfo() {
@@ -140,14 +182,17 @@
         output.className = 'loading';
         output.textContent = 'Loading...';
         
-        // Determine if we're running locally or on Vercel
-        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const API_URL = isLocal ? 'http://localhost:5000/network' : '/api/network';
+        const API_URL = window.location.hostname === 'localhost' 
+          ? 'http://localhost:5000/api/network'
+          : '/api/network';
+          
+        console.log('Fetching from:', API_URL); // Debug log
         
         const res = await fetch(API_URL, {
           method: 'GET',
           headers: {
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            'Cache-Control': 'no-cache'
           }
         });
         
@@ -169,24 +214,16 @@
         output.appendChild(createNetworkTable(data));
       } catch (err) {
         output.className = 'error';
-        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        console.error('Fetch error:', err); // Debug log
         
-        if (err.message.includes('Failed to fetch') || err.message.includes('ERR_CONNECTION_REFUSED')) {
-          if (isLocal) {
-            output.innerHTML = `
-              <p>Error: Could not connect to the local server. Please make sure:</p>
-              <ul>
-                <li>The server is running (use 'node agent.js')</li>
-                <li>Port 5000 is available</li>
-                <li>You're accessing the site through http://localhost:5000</li>
-              </ul>
-            `;
-          } else {
-            // When deployed, show appropriate message
-            output.textContent = 'Connecting to network information service...';
-            // Retry with the API endpoint
-            setTimeout(fetchNetworkInfo, 2000);
-          }
+        if (err.message.includes('Failed to fetch') || err.message.includes('HTTP error')) {
+          output.innerHTML = `
+            <p>Error: Could not connect to the network information service.</p>
+            <p>Status: ${err.message}</p>
+            <p>URL: ${API_URL}</p>
+            <p>Please try refreshing the page. If the problem persists, the service might be temporarily unavailable.</p>
+            <button onclick="fetchNetworkInfo()" class="refresh-button">Try Again</button>
+          `;
         } else {
           output.textContent = 'Error: ' + err.message;
         }
