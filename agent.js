@@ -1,11 +1,18 @@
 // agent.js
-const express = require("express");
-const { exec } = require("child_process");
-const cors = require("cors");
-const os = require("os");
+const express = require('express');
+const { exec } = require('child_process');
+const cors = require('cors');
 
 const app = express();
-app.use(cors());
+app.use(cors()); // boleh diakses dari frontend
+
+// Serve static files from current directory
+app.use(express.static(__dirname));
+
+// Serve index.html at root path
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/index.html');
+});
 
 function parseIpconfig(output) {
   // ambil IPv4, Subnet Mask, Lease Obtained/Expires, Default Gateway, DHCP Server
@@ -41,79 +48,36 @@ function parseSSID(netshOutput) {
   return null;
 }
 
-// Get network interfaces information using 'os' module
-function getNetworkInterfaces() {
-  const interfaces = os.networkInterfaces();
-  const results = [];
-  
-  for (const [name, addrs] of Object.entries(interfaces)) {
-    for (const addr of addrs) {
-      if (addr.family === 'IPv4' && !addr.internal) {
-        results.push({
-          interface: name,
-          ipv4: addr.address,
-          subnetMask: addr.netmask,
-          mac: addr.mac
-        });
-      }
-    }
-  }
-  return results;
-}
+// 🔹 Endpoint utama
+app.get('/network', (req, res) => {
+  // Set proper content type header
+  res.setHeader('Content-Type', 'application/json');
 
-app.get("/network", async (req, res) => {
-  try {
-    // Get client's IP address
-    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    
-    // Get all network interfaces
-    const networkInterfaces = getNetworkInterfaces();
-    
-    let networkData = {
-      clientIp: clientIp,
-      interfaces: networkInterfaces,
-      timestamp: new Date().toISOString()
-    };
-
-    // If on Windows, try to get additional network information
-    if (process.platform === 'win32') {
-      try {
-        const [netshStdout, ipStdout] = await Promise.all([
-          new Promise((resolve) => {
-            exec("netsh wlan show interfaces", (err, stdout) => {
-              resolve(err ? "" : stdout);
-            });
-          }),
-          new Promise((resolve) => {
-            exec("ipconfig /all", (err, stdout) => {
-              resolve(err ? "" : stdout);
-            });
-          })
-        ]);
-
-        const ssid = parseSSID(netshStdout);
-        const ipConfig = parseIpconfig(ipStdout);
-        
-        networkData = {
-          ...networkData,
-          ssid,
-          ...ipConfig
-        };
-      } catch (err) {
-        console.error('Windows-specific command error:', err);
-      }
-    }
-
-    res.json(networkData);
-  } catch (error) {
-    res.status(500).json({ 
-      error: "Failed to get network information",
-      message: error.message 
+  // Untuk Vercel deployment, berikan pesan khusus
+  if (process.env.VERCEL) {
+    res.json({
+      message: "This feature requires running on a local machine to access network information"
     });
+    return;
   }
+
+  exec('netsh wlan show interfaces', (err, netshStdout) => {
+    if (err) netshStdout = '';
+    exec('ipconfig /all', (err2, ipStdout) => {
+      if (err2) {
+        res.status(500).json({ error: 'Gagal menjalankan ipconfig' });
+        return;
+      }
+      const ssid = parseSSID(netshStdout);
+      const ip = parseIpconfig(ipStdout);
+      res.json({ ssid, ...ip });
+    });
+  });
 });
 
+// 🔹 Jalankan server di port 5000
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Network agent running at http://localhost:${PORT}/network`);
-});
+app.listen(PORT, () =>
+  console.log(`✅ Network agent running at http://localhost:${PORT}/network`)
+);
+// });

@@ -100,100 +100,38 @@
 
   <script>
     function createNetworkTable(data) {
-      const container = document.createElement('div');
+      if (data.message) {
+        // Handle Vercel deployment message
+        const message = document.createElement('div');
+        message.className = 'error';
+        message.textContent = data.message;
+        return message;
+      }
+
+      const table = document.createElement('table');
+      table.className = 'network-table';
       
-      // Client IP Section
-      if (data.clientIp) {
-        const clientTable = document.createElement('table');
-        clientTable.className = 'network-table';
-        const row = clientTable.insertRow();
-        row.insertCell(0).outerHTML = '<th>Your IP Address</th>';
-        row.insertCell(1).textContent = data.clientIp;
-        container.appendChild(clientTable);
-      }
+      const fields = [
+        { key: 'ssid', label: 'Wi-Fi Network' },
+        { key: 'ipv4', label: 'IPv4 Address' },
+        { key: 'subnetMask', label: 'Subnet Mask' },
+        { key: 'defaultGateway', label: 'Default Gateway' },
+        { key: 'dhcpServer', label: 'DHCP Server' },
+        { key: 'leaseObtained', label: 'Lease Obtained' },
+        { key: 'leaseExpires', label: 'Lease Expires' }
+      ];
 
-      // Network Interfaces Section
-      if (data.interfaces && data.interfaces.length > 0) {
-        const interfacesTitle = document.createElement('h2');
-        interfacesTitle.textContent = 'Network Interfaces';
-        interfacesTitle.style.marginTop = '20px';
-        container.appendChild(interfacesTitle);
-
-        data.interfaces.forEach((iface, index) => {
-          const table = document.createElement('table');
-          table.className = 'network-table';
-          
-          const fields = [
-            { key: 'interface', label: 'Interface Name' },
-            { key: 'ipv4', label: 'IPv4 Address' },
-            { key: 'subnetMask', label: 'Subnet Mask' },
-            { key: 'mac', label: 'MAC Address' }
-          ];
-
-          fields.forEach(({ key, label }) => {
-            if (iface[key]) {
-              const row = table.insertRow();
-              const cell1 = row.insertCell(0);
-              const cell2 = row.insertCell(1);
-              cell1.outerHTML = `<th>${label}</th>`;
-              cell2.textContent = iface[key];
-            }
-          });
-
-          if (index > 0) {
-            const spacer = document.createElement('div');
-            spacer.style.margin = '10px 0';
-            container.appendChild(spacer);
-          }
-          container.appendChild(table);
-        });
-      }
-
-      // Windows-specific network information
-      if (data.ssid || data.defaultGateway) {
-        const winTitle = document.createElement('h2');
-        winTitle.textContent = 'Additional Network Information';
-        winTitle.style.marginTop = '20px';
-        container.appendChild(winTitle);
-
-        const winTable = document.createElement('table');
-        winTable.className = 'network-table';
-        
-        const winFields = [
-          { key: 'ssid', label: 'Wi-Fi Network' },
-          { key: 'defaultGateway', label: 'Default Gateway' },
-          { key: 'dhcpServer', label: 'DHCP Server' },
-          { key: 'leaseObtained', label: 'Lease Obtained' },
-          { key: 'leaseExpires', label: 'Lease Expires' }
-        ];
-
-        winFields.forEach(({ key, label }) => {
-          if (data[key]) {
-            const row = winTable.insertRow();
-            const cell1 = row.insertCell(0);
-            const cell2 = row.insertCell(1);
-            cell1.outerHTML = `<th>${label}</th>`;
-            cell2.textContent = data[key];
-          }
-        });
-
-        if (winTable.rows.length > 0) {
-          container.appendChild(winTable);
+      fields.forEach(({ key, label }) => {
+        if (data[key]) {
+          const row = table.insertRow();
+          const cell1 = row.insertCell(0);
+          const cell2 = row.insertCell(1);
+          cell1.outerHTML = `<th>${label}</th>`;
+          cell2.textContent = data[key];
         }
-      }
+      });
 
-      // Add timestamp
-      if (data.timestamp) {
-        const timestamp = document.createElement('div');
-        timestamp.style.marginTop = '20px';
-        timestamp.style.textAlign = 'right';
-        timestamp.style.color = '#666';
-        timestamp.style.fontSize = '12px';
-        timestamp.textContent = 'Last updated: ' + new Date(data.timestamp).toLocaleString();
-        container.appendChild(timestamp);
-      }
-
-      return container;
+      return table;
     }
 
     async function fetchNetworkInfo() {
@@ -201,13 +139,22 @@
       try {
         output.className = 'loading';
         output.textContent = 'Loading...';
-
-        // Use relative URL that works both locally and on Vercel
-        const baseUrl = window.location.hostname === 'localhost' 
-          ? 'http://localhost:5000' 
-          : '';
         
-        const res = await fetch(`${baseUrl}/network`);
+        const API_URL = 'http://localhost:5000/network';
+        const res = await fetch(API_URL, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+        
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          throw new Error('Response is not JSON');
+        }
         const data = await res.json();
         
         if (data.error) {
