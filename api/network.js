@@ -59,16 +59,17 @@ const handler = async (req, res) => {
   try {
     // In production (Vercel or other non-Windows), prefer client-provided local IP
     if (process.platform !== 'win32') {
-      const clientLocalIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '').split(',')[0].trim();
+      const rawIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '').split(',')[0].trim();
+      const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+      const isIpv4 = ipv4Regex.test(rawIp) && rawIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255);
 
-      // Derive common local-network values from the provided client IP when possible
-      let ipv4 = clientLocalIp || null;
+      let ipv4 = null;
       let subnetMask = null;
       let defaultGateway = null;
       let dhcpServer = null;
 
-      if (ipv4 && ipv4.includes('.')) {
-        // Use a common /24 default if nothing better
+      if (isIpv4) {
+        ipv4 = rawIp;
         subnetMask = '255.255.255.0';
         const parts = ipv4.split('.');
         defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
@@ -77,14 +78,14 @@ const handler = async (req, res) => {
 
       return res.status(200).json({
         ssid: null,
-        ipv4: ipv4,
-        subnetMask: subnetMask,
+        ipv4,
+        subnetMask,
         leaseObtained: null,
         leaseExpires: null,
-        defaultGateway: defaultGateway,
-        dhcpServer: dhcpServer,
+        defaultGateway,
+        dhcpServer,
         timestamp: new Date().toISOString(),
-        note: 'Client-supplied local network info used in cloud environment'
+        note: isIpv4 ? 'Client-supplied local network info used in cloud environment' : 'No valid client IPv4 provided'
       });
     }
 
