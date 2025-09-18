@@ -140,7 +140,10 @@
         output.className = 'loading';
         output.textContent = 'Loading...';
         
-        const API_URL = 'http://localhost:5000/network';
+        // Determine if we're running locally or on Vercel
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const API_URL = isLocal ? 'http://localhost:5000/network' : '/api/network';
+        
         const res = await fetch(API_URL, {
           method: 'GET',
           headers: {
@@ -166,7 +169,27 @@
         output.appendChild(createNetworkTable(data));
       } catch (err) {
         output.className = 'error';
-        output.textContent = 'Error: ' + err.message;
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        if (err.message.includes('Failed to fetch') || err.message.includes('ERR_CONNECTION_REFUSED')) {
+          if (isLocal) {
+            output.innerHTML = `
+              <p>Error: Could not connect to the local server. Please make sure:</p>
+              <ul>
+                <li>The server is running (use 'node agent.js')</li>
+                <li>Port 5000 is available</li>
+                <li>You're accessing the site through http://localhost:5000</li>
+              </ul>
+            `;
+          } else {
+            // When deployed, show appropriate message
+            output.textContent = 'Connecting to network information service...';
+            // Retry with the API endpoint
+            setTimeout(fetchNetworkInfo, 2000);
+          }
+        } else {
+          output.textContent = 'Error: ' + err.message;
+        }
       }
     }
 
