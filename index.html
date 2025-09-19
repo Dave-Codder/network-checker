@@ -248,35 +248,7 @@
       }
     }
 
-    // Show a manual IP input if automatic detection failed
-    function showManualIpPrompt(currentOutput, onSubmit) {
-      currentOutput.innerHTML = '';
-      const info = document.createElement('div');
-      info.innerHTML = `
-        <p>Automatic local IP detection failed (browser/privacy limits). You can paste your local IP address (e.g. <code>192.168.1.12</code>) here:</p>
-      `;
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.placeholder = '192.168.x.x';
-      input.style.padding = '8px';
-      input.style.width = '60%';
-      input.style.marginRight = '8px';
-      const btn = document.createElement('button');
-      btn.textContent = 'Use this IP';
-      btn.className = 'refresh-button';
-      btn.onclick = () => {
-        const val = input.value.trim();
-        const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-        if (ipv4Regex.test(val) && val.split('.').every(n => Number(n) >= 0 && Number(n) <= 255)) {
-          onSubmit(val);
-        } else {
-          alert('Please enter a valid IPv4 address');
-        }
-      };
-      currentOutput.appendChild(info);
-      currentOutput.appendChild(input);
-      currentOutput.appendChild(btn);
-    }
+    // Manual input retired: detection is automatic
 
     function createNetworkTable(data) {
       const container = document.createElement('div');
@@ -344,14 +316,7 @@
         // Get local network info first
         const localNetworkInfo = await getLocalNetworkInfo();
 
-        // If we didn't get a local IP, prompt user for manual input
-        if (!localNetworkInfo.ipAddress) {
-          showManualIpPrompt(output, async (manualIp) => {
-            // re-run fetch with manual IP
-            await fetchNetworkInfoWithIp(manualIp);
-          });
-          return;
-        }
+        // If automatic detection didn't return an IP, proceed and the server will use headers/derivation
 
         // Determine API URL based on environment
         if (window.location.hostname === 'localhost') {
@@ -441,37 +406,9 @@
         output.textContent = 'Error: ' + err.message;
       }
     }
+    // Deprecated: fetchNetworkInfoWithIp remains for backward compatibility but not used by UI
 
-    async function submitRawOutput() {
-      const ipconfigRaw = document.getElementById('ipconfigRaw').value.trim();
-      const netshRaw = document.getElementById('netshRaw').value.trim();
-      const output = document.getElementById('output');
-      let API_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000/api/network' : '/api/network';
-      if (!ipconfigRaw) {
-        alert('Please paste the output of ipconfig /all into the first box.');
-        return;
-      }
-      try {
-        output.className = 'loading';
-        output.textContent = 'Submitting and parsing...';
-        const res = await fetch(API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({ ipconfig: ipconfigRaw, netsh: netshRaw })
-        });
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-        const data = await res.json();
-        output.className = '';
-        output.textContent = '';
-        output.appendChild(createNetworkTable(data));
-      } catch (err) {
-        output.className = 'error';
-        output.textContent = 'Error: ' + err.message;
-      }
-    }
+    // submitRawOutput removed — manual paste no longer supported
 
     fetchNetworkInfo();
   </script>
