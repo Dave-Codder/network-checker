@@ -9,7 +9,7 @@ const allowCors = fn => async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-Client-IP'
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-Client-IP, X-Network-SSID, X-Network-Type, X-Network-SubnetMask, X-Network-Gateway, X-Network-ID, X-Network-Signal, X-Network-Speed, X-Network-All-IPs, Cache-Control'
   );
   if (req.method === 'OPTIONS') {
     res.status(200).end();

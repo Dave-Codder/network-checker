@@ -133,66 +133,156 @@
 
           // 3. Enhanced IP detection using multiple RTCPeerConnection configurations
           const getLocalIPs = async () => {
-            const ips = new Set();
-            const promises = [];
+            const ips = {
+              private: new Set(),
+              public: new Set()
+            };
+            
+            // Helper to categorize IPs
+            const categorizeIP = (ip) => {
+              // Check if it's a valid IP
+              if (!ip.match(/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/)) return;
+              // Verify each octet is in valid range
+              const octets = ip.split('.').map(Number);
+              if (!octets.every(n => n >= 0 && n <= 255)) return;
+              
+              // Categorize based on RFC1918 private address spaces
+              if (
+                ip.match(/^192\.168\./) ||
+                ip.match(/^10\./) ||
+                ip.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)
+              ) {
+                ips.private.add(ip);
+              } else if (!ip.match(/^(127\.|169\.254\.)/)) {
+                // Add to public if not loopback or link-local
+                ips.public.add(ip);
+              }
+            };
 
-            // Try multiple STUN servers for redundancy
+            // Multiple STUN server configurations for redundancy
             const stunServers = [
-              'stun:stun.l.google.com:19302',
-              'stun:stun1.l.google.com:19302',
-              'stun:stun.services.mozilla.com'
+              'stun.l.google.com:19302',
+              'stun1.l.google.com:19302',
+              'stun2.l.google.com:19302',
+              'stun3.l.google.com:19302',
+              'stun.ekiga.net',
+              'stun.ideasip.com',
+              'stun.stunprotocol.org:3478',
+              'stun.voiparound.com',
+              'stun.voipbuster.com',
+              'stun.voipstunt.com',
+              'stun.voxgratia.org'
             ];
 
             // Function to gather candidates from a specific configuration
-            const gatherFromConfig = async (iceServers) => {
+            const gatherFromConfig = (config) => {
               return new Promise((resolve) => {
-                const pc = new RTCPeerConnection({ iceServers });
-                pc.createDataChannel('');
-                
-                pc.onicecandidate = (ice) => {
-                  if (!ice || !ice.candidate) return;
-                  
-                  // Look for IPv4 addresses in candidate
-                  const matches = [...ice.candidate.candidate.matchAll(/\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g)];
-                  
-                  matches.forEach(match => {
-                    const ip = match[0];
-                    // Filter private network IPs
-                    if (ip.match(/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/)) {
-                      ips.add(ip);
-                    }
-                  });
-                };
+                try {
+                  const pc = new RTCPeerConnection(config);
+                  let completed = false;
 
-                pc.createOffer()
+                  // Create multiple data channels to increase candidate gathering
+                  for (let i = 0; i < 5; i++) {
+                    pc.createDataChannel(`channel-${i}`);
+                  }
+                  
+                  pc.onicecandidate = ({ candidate }) => {
+                    if (!candidate) return;
+                    
+                    // Extract IPv4 addresses from candidate string
+                    const matches = candidate.candidate.match(/(?:[0-9]{1,3}\.){3}[0-9]{1,3}/g);
+                    if (matches) {
+                      matches.forEach(categorizeIP);
+                    }
+                  };
+
+                  pc.onicegatheringstatechange = () => {
+                    if (pc.iceGatheringState === 'complete' && !completed) {
+                      completed = true;
+                      try { pc.close(); } catch(e) {}
+                      resolve();
+                    }
+                  };
+
+                  // Create offer with all media types to maximize candidate gathering
+                  pc.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                  })
                   .then(offer => pc.setLocalDescription(offer))
                   .catch(console.warn);
 
-                // Resolve after gathering or timeout
-                setTimeout(() => {
-                  try { pc.close(); } catch (e) {}
+                  // Faster timeout for quicker results
+                  setTimeout(() => {
+                    if (!completed) {
+                      completed = true;
+                      try { pc.close(); } catch(e) {}
+                      resolve();
+                    }
+                  }, 1000); // Reduced to 1 second
+
+                  // Force faster gathering
+                  if (pc.addTransceiver) {
+                    try {
+                      pc.addTransceiver('audio');
+                      pc.addTransceiver('video');
+                    } catch (e) {
+                      console.warn('Transceiver error:', e);
+                    }
+                  }
+                } catch (e) {
+                  console.warn('RTCPeerConnection creation failed:', e);
                   resolve();
-                }, 1000);
+                }
               });
             };
 
-            // Try with no STUN first (local candidates only)
-            promises.push(gatherFromConfig([]));
-            
-            // Then try each STUN server
-            stunServers.forEach(server => {
-              promises.push(gatherFromConfig([{ urls: server }]));
-            });
+            // Run local and STUN gatherings in parallel for speed
+            const gatheringPromises = [
+              // Local candidates first
+              gatherFromConfig({
+                iceServers: [],
+                iceTransportPolicy: 'all',
+                iceCandidatePoolSize: 2
+              }),
+              
+              // Try multiple STUN configurations in parallel
+              ...stunServers.slice(0, 4).map(server => 
+                gatherFromConfig({
+                  iceServers: [{ 
+                    urls: `stun:${server}`,
+                    iceTransportPolicy: 'all'
+                  }],
+                  iceCandidatePoolSize: 2,
+                  bundlePolicy: 'max-bundle',
+                  rtcpMuxPolicy: 'require'
+                })
+              )
+            ];
 
-            await Promise.all(promises);
-            return Array.from(ips);
+            // Wait for the first few gatherings to complete
+            await Promise.race([
+              Promise.all(gatheringPromises),
+              new Promise(resolve => setTimeout(resolve, 1500)) // Timeout after 1.5s
+            ]);
+
+            return {
+              privateIPs: Array.from(ips.private),
+              publicIPs: Array.from(ips.public)
+            };
           };
 
           // 4. Get local IPs and additional info
-          const localIPs = await getLocalIPs();
-          if (localIPs.length > 0) {
-            networkInfo.ipAddress = localIPs[0]; // Primary IP
-            networkInfo.allLocalIPs = localIPs; // All discovered IPs
+          const ipInfo = await getLocalIPs();
+          
+          // Always include all discovered IPs
+          networkInfo.privateIPs = ipInfo.privateIPs;
+          networkInfo.publicIPs = ipInfo.publicIPs;
+          
+          // Set primary IP - prefer private IP if available
+          if (ipInfo.privateIPs.length > 0) {
+            networkInfo.ipAddress = ipInfo.privateIPs[0];
+            networkInfo.isPrivate = true;
             
             // Derive subnet mask based on private network type
             if (networkInfo.ipAddress.startsWith('192.168.')) {
@@ -207,6 +297,10 @@
             const ipParts = networkInfo.ipAddress.split('.');
             networkInfo.networkId = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}`;
             networkInfo.defaultGateway = `${networkInfo.networkId}.1`;
+          } else if (ipInfo.publicIPs.length > 0) {
+            // Fallback to public IP if no private IP found
+            networkInfo.ipAddress = ipInfo.publicIPs[0];
+            networkInfo.isPrivate = false;
           }
 
           // 5. Try to detect DNS servers using WebRTC's internal DNS resolution
@@ -261,8 +355,30 @@
       // Define the fields to display
       const networkFields = [
         { key: 'ssid', label: 'Network Name' },
-        // API returns 'ipv4' but older UI uses 'ipAddress' from local detection. Prefer API value when present.
-        { key: 'ipv4', label: 'IP Address' },
+        // API returns 'ipv4' but older UI uses 'ipAddress' from local detection. 
+        // For private IPs, show both WebRTC and API values
+        { 
+          key: 'ipAddress', 
+          label: data.isPrivate === false ? 'Public IP' : 'Private IP',
+          condition: data.ipAddress !== undefined
+        },
+        { 
+          key: 'ipv4', 
+          label: 'Network IP', 
+          condition: data.ipv4 !== undefined && data.ipv4 !== data.ipAddress 
+        },
+        { 
+          key: 'privateIPs', 
+          label: 'All Private IPs', 
+          formatter: ips => Array.isArray(ips) ? ips.join(', ') : ips,
+          condition: Array.isArray(data.privateIPs) && data.privateIPs.length > 0
+        },
+        { 
+          key: 'publicIPs', 
+          label: 'All Public IPs', 
+          formatter: ips => Array.isArray(ips) ? ips.join(', ') : ips,
+          condition: Array.isArray(data.publicIPs) && data.publicIPs.length > 0
+        },
         { key: 'subnetMask', label: 'Subnet Mask' },
         { key: 'defaultGateway', label: 'Default Gateway' },
         { key: 'dhcpServer', label: 'DHCP Server' },
@@ -274,12 +390,15 @@
       ];
 
       // Add each field to the table
-      networkFields.forEach(({ key, label }) => {
+      networkFields.forEach(({ key, label, condition, formatter }) => {
         const value = data[key] !== undefined && data[key] !== null ? data[key] : null;
+        // Skip if there's a condition and it's not met
+        if (condition === false) return;
         if (value) {
           const row = networkTable.insertRow();
           row.insertCell(0).outerHTML = `<th>${label}</th>`;
-          row.insertCell(1).textContent = value;
+          // Use formatter if provided, otherwise use value as is
+          row.insertCell(1).textContent = formatter ? formatter(value) : value;
         }
       });
 
@@ -311,16 +430,29 @@
       
       try {
         output.className = 'loading';
-        output.textContent = 'Loading...';
+        output.innerHTML = `
+          <div style="text-align: center;">
+            <div>Detecting network information...</div>
+            <div style="font-size: 0.9em; color: #666; margin-top: 5px;">This may take a few seconds</div>
+            <div id="progress" style="margin-top: 10px; font-size: 0.8em; color: #888;"></div>
+          </div>
+        `;
         
-        // Get local network info first
+        const progress = document.getElementById('progress');
+        
+        // Get local network info with progress updates
         const localNetworkInfo = await getLocalNetworkInfo();
+        
+        // Show immediate results while waiting for API
+        if (localNetworkInfo.privateIPs?.length > 0 || localNetworkInfo.publicIPs?.length > 0) {
+          progress.textContent = 'Network interfaces detected, fetching additional information...';
+        }
 
         // If automatic detection didn't return an IP, proceed and the server will use headers/derivation
 
         // Determine API URL based on environment
         if (window.location.hostname === 'localhost') {
-          API_URL = 'http://localhost:3000/api/network';
+          API_URL = '/api/network';
         } else {
           API_URL = '/api/network';
         }
@@ -343,7 +475,25 @@
         if (localNetworkInfo.effectiveType) headers['X-Network-Speed'] = localNetworkInfo.effectiveType;
         if (localNetworkInfo.allLocalIPs) headers['X-Network-All-IPs'] = localNetworkInfo.allLocalIPs.join(',');
 
-        const res = await fetch(API_URL, {
+        // Fetch with timeout
+        const fetchWithTimeout = async (url, options, timeout = 5000) => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+          
+          try {
+            const response = await fetch(url, {
+              ...options,
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            return response;
+          } catch (error) {
+            clearTimeout(timeoutId);
+            throw error;
+          }
+        };
+
+        const res = await fetchWithTimeout(API_URL, {
           method: 'GET',
           headers
         });

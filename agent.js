@@ -4,7 +4,15 @@ const { exec } = require('child_process');
 const cors = require('cors');
 
 const app = express();
-app.use(cors()); // boleh diakses dari frontend
+
+// Configure CORS for development
+app.use(cors({
+  origin: ['http://localhost:5000', 'http://127.0.0.1:5000'],
+  methods: ['GET'],
+  allowedHeaders: ['Accept', 'Content-Type', 'X-Client-IP', 'X-Network-SSID', 'X-Network-Type', 
+    'X-Network-SubnetMask', 'X-Network-Gateway', 'X-Network-ID', 'X-Network-Signal', 
+    'X-Network-Speed', 'X-Network-All-IPs', 'Cache-Control']
+}));
 
 // Serve static files from current directory
 app.use(express.static(__dirname));
@@ -12,6 +20,11 @@ app.use(express.static(__dirname));
 // Serve index.html at root path
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/index.html');
+});
+
+// Add API endpoint alias
+app.get('/api/network', (req, res) => {
+  res.redirect('/network');
 });
 
 function parseIpconfig(output) {
@@ -61,16 +74,66 @@ app.get('/network', (req, res) => {
     return;
   }
 
+  // Get client IP from headers if available
+  const clientIP = req.headers['x-client-ip'];
+  const clientNetworkInfo = {
+    ssid: req.headers['x-network-ssid'],
+    type: req.headers['x-network-type'],
+    subnetMask: req.headers['x-network-subnetmask'],
+    defaultGateway: req.headers['x-network-gateway'],
+    networkId: req.headers['x-network-id'],
+    signalStrength: req.headers['x-network-signal'],
+    networkSpeed: req.headers['x-network-speed']
+  };
+
+  // Clean undefined values
+  Object.keys(clientNetworkInfo).forEach(key => 
+    clientNetworkInfo[key] === undefined && delete clientNetworkInfo[key]
+  );
+
   exec('netsh wlan show interfaces', (err, netshStdout) => {
-    if (err) netshStdout = '';
+    // Don't treat WLAN error as fatal
+    if (err) {
+      console.warn('WLAN info not available:', err.message);
+      netshStdout = '';
+    }
+
     exec('ipconfig /all', (err2, ipStdout) => {
       if (err2) {
-        res.status(500).json({ error: 'Gagal menjalankan ipconfig' });
+        console.error('Failed to get network info:', err2);
+        res.status(500).json({ 
+          error: 'Failed to get network information',
+          details: err2.message,
+          clientInfo: clientNetworkInfo 
+        });
         return;
       }
-      const ssid = parseSSID(netshStdout);
-      const ip = parseIpconfig(ipStdout);
-      res.json({ ssid, ...ip });
+
+      try {
+        const ssid = parseSSID(netshStdout);
+        const ip = parseIpconfig(ipStdout);
+
+        // Combine client-side and server-side info
+        const result = {
+          ...clientNetworkInfo,
+          ...ip,
+          timestamp: new Date().toISOString()
+        };
+
+        // Only set SSID if we found one server-side or got one from client
+        if (ssid || clientNetworkInfo.ssid) {
+          result.ssid = ssid || clientNetworkInfo.ssid;
+        }
+
+        res.json(result);
+      } catch (e) {
+        console.error('Error parsing network info:', e);
+        res.status(500).json({ 
+          error: 'Failed to parse network information',
+          details: e.message,
+          clientInfo: clientNetworkInfo
+        });
+      }
     });
   });
 });
