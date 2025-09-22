@@ -94,69 +94,75 @@ const handler = async (req, res) => {
     if (process.platform !== 'win32') {
       // Get network info from headers and query params
       const clientInfo = {};
+      const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+      const rawIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || '').split(',')[0].trim();
+      const isIpv4 = ipv4Regex.test(rawIp) && rawIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255);
+      
+      // Parse additional network info from headers
       try {
-        const rawIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || '').split(',')[0].trim();
-        const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-        
-        // Parse additional network info from headers
         Object.keys(req.headers).forEach(key => {
           if (key.toLowerCase().startsWith('x-network-')) {
             const infoKey = key.slice('x-network-'.length).toLowerCase();
             clientInfo[infoKey] = req.headers[key];
           }
         });
+      } catch (e) {
+        console.warn('Failed to parse network headers:', e);
+      }
 
-        // Validate IP and network structure
-        if (ipv4Regex.test(rawIp) && rawIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255)) {
-          const parts = rawIp.split('.');
-          const networkId = `${parts[0]}.${parts[1]}.${parts[2]}`;
-          
-          // Smart network info derivation
-          let subnetMask = '255.255.255.0'; // Default for class C
-          if (rawIp.startsWith('10.')) {
-            subnetMask = '255.0.0.0';  // Class A private
-          } else if (rawIp.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)) {
-            subnetMask = '255.240.0.0';  // Class B private
-          }
-          
-          // Derive gateway and network details
-          const defaultGateway = clientInfo.gateway || `${networkId}.1`;
-          const dhcpServer = clientInfo.dhcpServer || defaultGateway;
-          
-          // Use client-provided DNS or common private network DNS
-          const dnsServers = clientInfo.dnsServers ? 
-            clientInfo.dnsServers.split(',') : 
-            [defaultGateway, '8.8.8.8'];
-          
-          return res.status(200).json({
-            ssid: clientInfo.ssid || null,
-            ipv4: rawIp,
-            subnetMask,
-            defaultGateway,
-            dhcpServer,
-            dnsServers,
-            connectionType: clientInfo.type || 'unknown',
-            signalStrength: clientInfo.signalStrength || null,
-            networkSpeed: clientInfo.speed || null,
-            leaseObtained: new Date().toISOString(),
-            leaseExpires: new Date(Date.now() + 24*60*60*1000).toISOString(), // +24h
-            timestamp: new Date().toISOString(),
-            note: 'Enhanced client network info from browser APIs'
-          });
-        }      return res.status(200).json({
+      // If we have a valid IP, derive network details
+      if (isIpv4) {
+        const parts = rawIp.split('.');
+        const networkId = `${parts[0]}.${parts[1]}.${parts[2]}`;
+        
+        // Smart network info derivation based on IP class
+        let subnetMask = '255.255.255.0'; // Default for class C
+        if (rawIp.startsWith('10.')) {
+          subnetMask = '255.0.0.0';  // Class A private
+        } else if (rawIp.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)) {
+          subnetMask = '255.240.0.0';  // Class B private
+        }
+        
+        // Derive gateway and network details
+        const defaultGateway = clientInfo.gateway || `${networkId}.1`;
+        
+        // Use client-provided DNS or fallback to gateway + Google DNS
+        const dnsServers = clientInfo.dnsServers ? 
+          clientInfo.dnsServers.split(',') : 
+          [defaultGateway, '8.8.8.8'];
+        
+        return res.status(200).json({
+          ssid: clientInfo.ssid || null,
+          ipv4: rawIp,
+          subnetMask,
+          defaultGateway,
+          dhcpServer: clientInfo.dhcpServer || null, // don't assume DHCP = gateway
+          dnsServers,
+          connectionType: clientInfo.type || 'unknown',
+          signalStrength: clientInfo.signalStrength || null,
+          networkSpeed: clientInfo.speed || null,
+          leaseObtained: new Date().toISOString(),
+          leaseExpires: new Date(Date.now() + 24*60*60*1000).toISOString(), // +24h
+          timestamp: new Date().toISOString(),
+          note: 'Enhanced client network info from browser APIs'
+        });
+      }
+      
+      // No valid IP detected
+      return res.status(200).json({
         ssid: null,
-        ipv4,
-        subnetMask,
+        ipv4: null,
+        subnetMask: null,
+        defaultGateway: null,
+        dhcpServer: null,
+        dnsServers: null,
+        connectionType: clientInfo.type || 'unknown',
+        signalStrength: null,
+        networkSpeed: null,
         leaseObtained: null,
         leaseExpires: null,
-        defaultGateway,
-        dhcpServer,
-        dnsServers,
-        connectionSpecificDnsSuffix,
-        dhcpv6Iaid,
-        dhcpv6ClientDuid,
         timestamp: new Date().toISOString(),
-        note: isIpv4 ? 'Client-supplied local network info used in cloud environment (derived values)' : 'No valid client IPv4 provided'
+        note: 'No valid client IPv4 detected'
       });
     }
 
