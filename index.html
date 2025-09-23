@@ -128,10 +128,8 @@
         subnetMask: null,
         defaultGateway: null,
         networkId: null,
-        connectionType: null,
-        effectiveType: null,
-        downlink: null,
-        rtt: null
+        ssid: "Nama_SSID_Anda", // ganti sesuai SSID sebenarnya
+        dnsSuffix: "Connection-specific DNS Suffix"
       };
 
       // Derive subnet mask, gateway, network ID dari IP privat pertama
@@ -149,14 +147,6 @@
         networkInfo.defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
       }
 
-      // Tambah info dari navigator.connection kalau tersedia
-      if (navigator.connection) {
-        networkInfo.connectionType = navigator.connection.type || "unknown";
-        networkInfo.effectiveType = navigator.connection.effectiveType || "";
-        networkInfo.downlink = navigator.connection.downlink || "";
-        networkInfo.rtt = navigator.connection.rtt || "";
-      }
-
       // --- Render hasil ke tabel ---
       output.className = '';
       output.textContent = '';
@@ -164,16 +154,16 @@
       table.className = 'network-table';
 
       if (mdnsObserved) {
-      const row = table.insertRow();
-      row.insertCell(0).outerHTML = '<th>Status</th>';
-      const cell = row.insertCell(1);
-      cell.style.whiteSpace = "pre-line"; // ini biar \n jadi line break
-      cell.textContent = 
-        'Browser ini menyamarkan IP lokal (mDNS).\n\n' +
-        'Untuk menampilkan IP privat:\n' +
-        '• (Chrome/Edge) — buka chrome://flags, non-aktifkan "Anonymize local IPs exposed by WebRTC"\n  Link: chrome://flags/#enable-webrtc-hide-local-ips-with-mdns\n' +
-        '• (Firefox) — buka about:config dan set media.peerconnection.ice.obfuscate_host_addresses = false.';
-    }
+        const row = table.insertRow();
+        row.insertCell(0).outerHTML = '<th>Status</th>';
+        const cell = row.insertCell(1);
+        cell.style.whiteSpace = "pre-line";
+        cell.textContent = 
+          'Browser ini menyamarkan IP lokal (mDNS).\n\n' +
+          'Untuk menampilkan IP privat:\n' +
+          '• (Chrome/Edge) — buka chrome://flags, non-aktifkan "Anonymize local IPs exposed by WebRTC"\n  Link: chrome://flags/#enable-webrtc-hide-local-ips-with-mdns\n' +
+          '• (Firefox) — buka about:config dan set media.peerconnection.ice.obfuscate_host_addresses = false.';
+      }
 
       if (networkInfo.privateIPs.length === 0 && !mdnsObserved) {
         const row = table.insertRow();
@@ -193,18 +183,25 @@
       if (networkInfo.networkId) {
         table.insertRow().innerHTML = `<th>Network ID</th><td>${networkInfo.networkId}</td>`;
       }
-      if (networkInfo.connectionType) {
-        table.insertRow().innerHTML = `<th>Connection Type</th><td>${networkInfo.connectionType}</td>`;
-      }
-      if (networkInfo.effectiveType) {
-        table.insertRow().innerHTML = `<th>Effective Type</th><td>${networkInfo.effectiveType}</td>`;
-      }
-      if (networkInfo.downlink) {
-        table.insertRow().innerHTML = `<th>Downlink (Mbps)</th><td>${networkInfo.downlink}</td>`;
-      }
-      if (networkInfo.rtt) {
-        table.insertRow().innerHTML = `<th>RTT (ms)</th><td>${networkInfo.rtt}</td>`;
-      }
+
+      // Tambahkan deskripsi statis sesuai permintaan
+      const desc = 
+`Lease Obtained. . . . . . . . . . : Thursday, September 18, 2025 8:04:43 AM
+Lease Expires . . . . . . . . . . : Thursday, September 18, 2025 9:15:18 PM
+Default Gateway . . . . . . . . . : ${networkInfo.defaultGateway}
+DHCP Server . . . . . . . . . . . : 10.2.9.15
+DHCPv6 IAID . . . . . . . . . . . : 239882461
+DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-2F-04-70-A1-4C-50-DD-9B-B4-A6
+DNS Servers . . . . . . . . . . . : 10.2.9.15
+                                      10.1.0.2
+SSID: ${networkInfo.ssid}
+Connection-specific DNS Suffix: ${networkInfo.dnsSuffix}`;
+
+      const row = table.insertRow();
+      row.insertCell(0).outerHTML = '<th>Deskripsi</th>';
+      const cell = row.insertCell(1);
+      cell.style.whiteSpace = "pre-line";
+      cell.textContent = desc;
 
       output.appendChild(table);
     }
