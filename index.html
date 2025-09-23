@@ -55,7 +55,7 @@ async function detectNetwork() {
         }
     };
     await pc.setLocalDescription(await pc.createOffer());
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 1000));
     pc.close();
 
     const privateIPs = Array.from(ips);
@@ -81,7 +81,7 @@ async function detectNetwork() {
             if (data.ip) return data.ip;
         } catch {}
         try {
-            const res2 = await fetch('https://ipinfo.io/json?token='); // token opsional
+            const res2 = await fetch('https://ipinfo.io/json?token=7de3e574f56ab3'); // token opsional
             const data2 = await res2.json();
             if (data2.ip) return data2.ip;
         } catch {}
