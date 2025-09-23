@@ -122,30 +122,83 @@
       await new Promise(r => setTimeout(r, timeout));
       pc.close();
 
-      // Tampilkan hasil
+      // --- Kumpulkan informasi jaringan tambahan ---
+      const networkInfo = {
+        privateIPs: Array.from(ips),
+        subnetMask: null,
+        defaultGateway: null,
+        networkId: null,
+        connectionType: null,
+        effectiveType: null,
+        downlink: null,
+        rtt: null
+      };
+
+      // Derive subnet mask, gateway, network ID dari IP privat pertama
+      if (networkInfo.privateIPs.length > 0) {
+        const ip = networkInfo.privateIPs[0];
+        const parts = ip.split(".");
+        if (ip.startsWith("192.168.")) {
+          networkInfo.subnetMask = "255.255.255.0";
+        } else if (ip.startsWith("10.")) {
+          networkInfo.subnetMask = "255.0.0.0";
+        } else if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) {
+          networkInfo.subnetMask = "255.240.0.0";
+        }
+        networkInfo.networkId = `${parts[0]}.${parts[1]}.${parts[2]}`;
+        networkInfo.defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
+      }
+
+      // Tambah info dari navigator.connection kalau tersedia
+      if (navigator.connection) {
+        networkInfo.connectionType = navigator.connection.type || "unknown";
+        networkInfo.effectiveType = navigator.connection.effectiveType || "";
+        networkInfo.downlink = navigator.connection.downlink || "";
+        networkInfo.rtt = navigator.connection.rtt || "";
+      }
+
+      // --- Render hasil ke tabel ---
       output.className = '';
       output.textContent = '';
-
       const table = document.createElement('table');
       table.className = 'network-table';
 
       if (mdnsObserved) {
         const row = table.insertRow();
         row.insertCell(0).outerHTML = '<th>Status</th>';
-        row.insertCell(1).textContent = 'Browser ini menyamarkan IP lokal (mDNS). Untuk menampilkan IP privat:\n• (Chrome/Edge) — buka chrome://flags, non-aktifkan Anonymize local IPs exposed by WebRTC (chrome://flags/#enable-webrtc-hide-local-ips-with-mdns).\n• (Firefox) — buka about:config dan set media.peerconnection.ice.obfuscate_host_addresses = false.';
+        row.insertCell(1).textContent = 'Browser ini menyamarkan IP lokal (mDNS). Nonaktifkan fitur mDNS di browser untuk melihat IP privat.';
       }
 
-      if (ips.size === 0 && !mdnsObserved) {
+      if (networkInfo.privateIPs.length === 0 && !mdnsObserved) {
         const row = table.insertRow();
         row.insertCell(0).outerHTML = '<th>Status</th>';
-        row.insertCell(1).textContent = 'Browser ini menyamarkan IP lokal (mDNS). Untuk menampilkan IP privat:\n• (Chrome/Edge) — buka chrome://flags, non-aktifkan Anonymize local IPs exposed by WebRTC (chrome://flags/#enable-webrtc-hide-local-ips-with-mdns).\n• (Firefox) — buka about:config dan set media.peerconnection.ice.obfuscate_host_addresses = false.';
+        row.insertCell(1).textContent = 'Tidak ada IP privat terdeteksi.';
       }
 
-      ips.forEach(ip => {
-        const row = table.insertRow();
-        row.insertCell(0).outerHTML = '<th>Private IP</th>';
-        row.insertCell(1).textContent = ip;
-      });
+      if (networkInfo.privateIPs.length > 0) {
+        table.insertRow().innerHTML = `<th>Private IP(s)</th><td>${networkInfo.privateIPs.join(", ")}</td>`;
+      }
+      if (networkInfo.subnetMask) {
+        table.insertRow().innerHTML = `<th>Subnet Mask</th><td>${networkInfo.subnetMask}</td>`;
+      }
+      if (networkInfo.defaultGateway) {
+        table.insertRow().innerHTML = `<th>Default Gateway</th><td>${networkInfo.defaultGateway}</td>`;
+      }
+      if (networkInfo.networkId) {
+        table.insertRow().innerHTML = `<th>Network ID</th><td>${networkInfo.networkId}</td>`;
+      }
+      if (networkInfo.connectionType) {
+        table.insertRow().innerHTML = `<th>Connection Type</th><td>${networkInfo.connectionType}</td>`;
+      }
+      if (networkInfo.effectiveType) {
+        table.insertRow().innerHTML = `<th>Effective Type</th><td>${networkInfo.effectiveType}</td>`;
+      }
+      if (networkInfo.downlink) {
+        table.insertRow().innerHTML = `<th>Downlink (Mbps)</th><td>${networkInfo.downlink}</td>`;
+      }
+      if (networkInfo.rtt) {
+        table.insertRow().innerHTML = `<th>RTT (ms)</th><td>${networkInfo.rtt}</td>`;
+      }
 
       output.appendChild(table);
     }
