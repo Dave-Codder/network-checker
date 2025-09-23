@@ -55,7 +55,7 @@ async function detectNetwork() {
         }
     };
     await pc.setLocalDescription(await pc.createOffer());
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 10));
     pc.close();
 
     const privateIPs = Array.from(ips);
