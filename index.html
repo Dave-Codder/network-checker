@@ -166,7 +166,7 @@
       if (mdnsObserved) {
         const row = table.insertRow();
         row.insertCell(0).outerHTML = '<th>Status</th>';
-        row.insertCell(1).textContent = 'Browser ini menyamarkan IP lokal (mDNS). Nonaktifkan fitur mDNS di browser untuk melihat IP privat.';
+        row.insertCell(1).textContent = 'Browser ini menyamarkan IP lokal (mDNS). \n Untuk menampilkan IP privat:\n• (Chrome/Edge) — buka chrome://flags, non-aktifkan Anonymize local IPs exposed by WebRTC (chrome://flags/#enable-webrtc-hide-local-ips-with-mdns).\n• (Firefox) — buka about:config dan set media.peerconnection.ice.obfuscate_host_addresses = false.';
       }
 
       if (networkInfo.privateIPs.length === 0 && !mdnsObserved) {
