@@ -59,26 +59,36 @@ async function detectNetwork() {
     pc.close();
 
     const privateIPs = Array.from(ips);
-    let subnetMask = null, defaultGateway = null, networkId = null;
+    let subnetMask = "255.255.255.0", defaultGateway = null, networkId = null;
     if (privateIPs.length > 0) {
         const ip = privateIPs[0];
-        const parts = ip.split(".");
-        if (ip.startsWith("192.168.")) subnetMask = "255.255.255.0";
-        else if (ip.startsWith("10.")) subnetMask = "255.0.0.0";
-        else if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(ip)) subnetMask = "255.240.0.0";
+        const parts = ip.split(".").map(Number);
+
+        // Tentukan subnet mask berdasarkan range private IP
+        if (parts[0] === 10) subnetMask = "255.0.0.0";
+        else if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) subnetMask = "255.240.0.0";
+        else if (parts[0] === 192 && parts[1] === 168) subnetMask = "255.255.255.0";
+
         networkId = `${parts[0]}.${parts[1]}.${parts[2]}`;
         defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
     }
 
-    // --- IP Publik via fetch ---
-    let publicIP = "Tidak dapat dideteksi";
-    try {
-        const res = await fetch('https://api.ipify.org?format=json');
-        const data = await res.json();
-        publicIP = data.ip;
-    } catch (err) {
-        console.warn("Tidak bisa mengambil IP publik", err);
+    // --- IP Publik via fetch (fallback ke 2 layanan) ---
+    async function getPublicIP() {
+        try {
+            const res = await fetch('https://api.ipify.org?format=json');
+            const data = await res.json();
+            if (data.ip) return data.ip;
+        } catch {}
+        try {
+            const res2 = await fetch('https://ipinfo.io/json?token='); // token opsional
+            const data2 = await res2.json();
+            if (data2.ip) return data2.ip;
+        } catch {}
+        return "Tidak dapat dideteksi";
     }
+
+    const publicIP = await getPublicIP();
 
     // --- Render Tabel ---
     output.className = '';
