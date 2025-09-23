@@ -164,10 +164,16 @@
       table.className = 'network-table';
 
       if (mdnsObserved) {
-        const row = table.insertRow();
-        row.insertCell(0).outerHTML = '<th>Status</th>';
-        row.insertCell(1).textContent = 'Browser ini menyamarkan IP lokal (mDNS). \n Untuk menampilkan IP privat:\n• (Chrome/Edge) — buka chrome://flags, non-aktifkan Anonymize local IPs exposed by WebRTC (chrome://flags/#enable-webrtc-hide-local-ips-with-mdns).\n• (Firefox) — buka about:config dan set media.peerconnection.ice.obfuscate_host_addresses = false.';
-      }
+      const row = table.insertRow();
+      row.insertCell(0).outerHTML = '<th>Status</th>';
+      const cell = row.insertCell(1);
+      cell.style.whiteSpace = "pre-line"; // ini biar \n jadi line break
+      cell.textContent = 
+        'Browser ini menyamarkan IP lokal (mDNS).\n\n' +
+        'Untuk menampilkan IP privat:\n' +
+        '• (Chrome/Edge) — buka chrome://flags, non-aktifkan "Anonymize local IPs exposed by WebRTC"\n  Link: chrome://flags/#enable-webrtc-hide-local-ips-with-mdns\n' +
+        '• (Firefox) — buka about:config dan set media.peerconnection.ice.obfuscate_host_addresses = false.';
+    }
 
       if (networkInfo.privateIPs.length === 0 && !mdnsObserved) {
         const row = table.insertRow();
