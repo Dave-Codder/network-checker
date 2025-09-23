@@ -185,23 +185,36 @@
       }
 
       // Tambahkan deskripsi statis sesuai permintaan
-      const desc = 
-`Lease Obtained. . . . . . . . . . : Thursday, September 18, 2025 8:04:43 AM
-Lease Expires . . . . . . . . . . : Thursday, September 18, 2025 9:15:18 PM
-Default Gateway . . . . . . . . . : ${networkInfo.defaultGateway}
-DHCP Server . . . . . . . . . . . : 10.2.9.15
-DHCPv6 IAID . . . . . . . . . . . : 239882461
-DHCPv6 Client DUID. . . . . . . . : 00-01-00-01-2F-04-70-A1-4C-50-DD-9B-B4-A6
-DNS Servers . . . . . . . . . . . : 10.2.9.15
-                                      10.1.0.2
-SSID: ${networkInfo.ssid}
-Connection-specific DNS Suffix: ${networkInfo.dnsSuffix}`;
-
-      const row = table.insertRow();
-      row.insertCell(0).outerHTML = '<th>Deskripsi</th>';
-      const cell = row.insertCell(1);
-      cell.style.whiteSpace = "pre-line";
-      cell.textContent = desc;
+      // Tampilkan setiap deskripsi sebagai baris terpisah, ambil dari networkInfo
+      if (networkInfo.leaseObtained) {
+        table.insertRow().innerHTML = `<th>Lease Obtained</th><td>${networkInfo.leaseObtained}</td>`;
+      }
+      if (networkInfo.leaseExpires) {
+        table.insertRow().innerHTML = `<th>Lease Expires</th><td>${networkInfo.leaseExpires}</td>`;
+      }
+      if (networkInfo.defaultGateway) {
+        table.insertRow().innerHTML = `<th>Default Gateway</th><td>${networkInfo.defaultGateway}</td>`;
+      }
+      if (networkInfo.dhcpServer) {
+        table.insertRow().innerHTML = `<th>DHCP Server</th><td>${networkInfo.dhcpServer}</td>`;
+      }
+      if (networkInfo.dhcpv6Iaid) {
+        table.insertRow().innerHTML = `<th>DHCPv6 IAID</th><td>${networkInfo.dhcpv6Iaid}</td>`;
+      }
+      if (networkInfo.dhcpv6ClientDuid) {
+        table.insertRow().innerHTML = `<th>DHCPv6 Client DUID</th><td>${networkInfo.dhcpv6ClientDuid}</td>`;
+      }
+      if (networkInfo.dnsServers && Array.isArray(networkInfo.dnsServers)) {
+        table.insertRow().innerHTML = `<th>DNS Servers</th><td>${networkInfo.dnsServers.join('<br>')}</td>`;
+      } else if (networkInfo.dnsServers) {
+        table.insertRow().innerHTML = `<th>DNS Servers</th><td>${networkInfo.dnsServers}</td>`;
+      }
+      if (networkInfo.ssid) {
+        table.insertRow().innerHTML = `<th>SSID</th><td>${networkInfo.ssid}</td>`;
+      }
+      if (networkInfo.dnsSuffix) {
+        table.insertRow().innerHTML = `<th>Connection-specific DNS Suffix</th><td>${networkInfo.dnsSuffix}</td>`;
+      }
 
       output.appendChild(table);
     }
