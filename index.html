@@ -77,7 +77,7 @@ async function detectNetwork() {
     let backendInfo = null;
     try {
         backendInfo = await new Promise((resolve, reject) => {
-            const ws = new WebSocket("wss://7gtq56-50000.csb.app"); // ganti sesuai backend
+            const ws = new WebSocket("wss://7gtq56-10000.csb.app"); // ganti sesuai backend
             ws.onopen = () => ws.send("getNetworkInfo");
             ws.onmessage = (event) => {
                 try { resolve(JSON.parse(event.data)); } 
