@@ -26,8 +26,21 @@ h1 { color: #2c3e50; text-align: center; margin-bottom: 20px; border-bottom: 2px
 <div id="output" class="loading">Klik tombol di bawah untuk memulai deteksi jaringan...</div>
 <div style="margin-top: 20px;">
   <label for="ssidInput"><b>SSID:</b></label>
-  <input type="text" id="ssidInput" placeholder="Masukkan nama WiFi (SSID)">
-  <button onclick="saveSSID()">Simpan SSID</button>
+<div style="margin-top: 20px; display:flex; gap:10px; align-items:center;">
+  <input 
+    type="text" 
+    id="ssidInput" 
+    placeholder="Masukkan nama WiFi (SSID)" 
+    style="flex:1; padding:10px; border-radius:6px; border:1px solid #ccc; font-size:14px;"
+  >
+  <button 
+    id="saveSSIDBtn" 
+    style="padding:10px 20px; border:none; background-color:#3498db; color:white; border-radius:6px; cursor:pointer; font-size:14px;"
+    onclick="saveSSID()"
+  >💾 Simpan</button>
+</div>
+<div id="ssidStatus" style="margin-top:10px; font-size:13px;"></div>
+
 </div>
 <button class="refresh-button" onclick="detectNetwork()">Deteksi Sekarang</button>
 </div>
@@ -41,36 +54,40 @@ const supabase = Supabase.createClient(supabaseUrl, supabaseKey);
 // --- Fungsi untuk menyimpan SSID ke Supabase ---
 async function saveSSID() {
     const ssid = document.getElementById('ssidInput').value.trim();
+    const statusDiv = document.getElementById('ssidStatus');
+    statusDiv.textContent = '';
+
     if (!ssid) {
-        alert('Nama SSID tidak boleh kosong.');
+        statusDiv.textContent = '⚠️ SSID tidak boleh kosong.';
+        statusDiv.style.color = 'red';
         return;
     }
 
     try {
+        // Pastikan Supabase sudah diinisialisasi
+        if (!supabase) throw new Error('Supabase belum diinisialisasi!');
+
         const ip = await detectPublicIP();
-        const now = new Date().toISOString(); // --- PERBAIKAN: Dapatkan timestamp saat ini ---
+        const now = new Date().toISOString();
 
-        // --- PERBAIKAN: Tambahkan 'last_seen' saat melakukan upsert ---
-        // Pastikan Anda memiliki kolom 'last_seen' dengan tipe 'timestamp' atau 'timestamptz' di tabel Supabase
         const { error } = await supabase.from('user_network')
-            .upsert({ 
-                ssid: ssid, 
+            .upsert({
+                ssid: ssid,
                 ip_address: ip,
-                last_seen: now 
-            }, { 
-                onConflict: 'ssid' 
-            });
+                last_seen: now
+            }, { onConflict: ['ssid'] });
 
-        if (error) {
-            throw error;
-        }
-        
-        alert(`SSID "${ssid}" berhasil disimpan dengan IP publik ${ip}.`);
-    } catch (error) {
-        console.error('Gagal menyimpan SSID:', error);
-        alert('Gagal menyimpan SSID: ' + error.message);
+        if (error) throw error;
+
+        statusDiv.textContent = `✅ SSID "${ssid}" berhasil disimpan dengan IP publik ${ip}.`;
+        statusDiv.style.color = 'green';
+    } catch (err) {
+        console.error(err);
+        statusDiv.textContent = `❌ Gagal menyimpan SSID: ${err.message}`;
+        statusDiv.style.color = 'red';
     }
 }
+
 
 // --- Fungsi untuk mengambil IP Publik dari API ipify ---
 async function detectPublicIP() {
