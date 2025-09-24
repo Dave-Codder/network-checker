@@ -17,125 +17,133 @@ h1 { color: #2c3e50; text-align: center; margin-bottom: 20px; border-bottom: 2px
 .refresh-button:hover { background-color: #2980b9; }
 .header { font-size: 18px; font-weight: 600; margin-top: 20px; color: #2c3e50; border-bottom: 1px solid #3498db; padding-bottom: 5px; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
 <div class="container">
 <h1>Network Checker</h1>
 <div id="output" class="loading">Klik tombol di bawah untuk deteksi IP...</div>
+<div>
+  <label>SSID:</label>
+  <input type="text" id="ssidInput" placeholder="Masukkan SSID">
+  <button onclick="saveSSID()">Simpan SSID</button>
+</div>
 <button class="refresh-button" onclick="detectNetwork()">Deteksi Sekarang</button>
 </div>
 
 <script>
+// --- Supabase setup ---
+const supabaseUrl = 'https://YOUR_PROJECT_ID.supabase.co';
+const supabaseKey = 'YOUR_ANON_KEY';
+const supabase = Supabase.createClient(supabaseUrl, supabaseKey);
+
+// --- Simpan SSID ---
+async function saveSSID() {
+  const ssid = document.getElementById('ssidInput').value.trim();
+  if (!ssid) return alert('SSID tidak boleh kosong');
+
+  const ip = await detectPublicIP();
+  await supabase.from('user_network')
+    .upsert({ ssid, ip_address: ip }, { onConflict: ['ssid'] });
+  alert('SSID tersimpan!');
+}
+
+// --- Ambil IP publik ---
+async function detectPublicIP() {
+  try {
+    const res = await fetch('https://api.ipify.org?format=json');
+    const data = await res.json();
+    return data.ip;
+  } catch {
+    return "Tidak dapat dideteksi";
+  }
+}
+
+// --- Deteksi jaringan ---
 async function detectNetwork() {
-    const output = document.getElementById('output');
-    output.className = 'loading';
-    output.textContent = 'Mendeteksi IP...';
+  const output = document.getElementById('output');
+  output.className = 'loading';
+  output.textContent = 'Mendeteksi IP...';
 
-    // --- IP Privat via WebRTC ---
-    const RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection;
-    const ips = new Set();
-    let mdnsObserved = false;
-    if (RTCPeerConnection) {
-        const pc = new RTCPeerConnection({iceServers:[]});
-        pc.createDataChannel("test");
-        pc.onicecandidate = (event) => {
-            if (!event.candidate) return;
-            const cand = event.candidate.candidate;
-            if (cand.includes(".local")) mdnsObserved = true;
-            const match = cand.match(/([0-9]{1,3}(\.[0-9]{1,3}){3})/);
-            if (match && match[1] !== "127.0.0.1") ips.add(match[1]);
-        };
-        await pc.setLocalDescription(await pc.createOffer());
-        await new Promise(r => setTimeout(r, 10));
-        pc.close();
+  // --- IP Privat via WebRTC ---
+  const RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+  const ips = new Set();
+  let mdnsObserved = false;
+  if (RTCPeerConnection) {
+    const pc = new RTCPeerConnection({iceServers:[]});
+    pc.createDataChannel("test");
+    pc.onicecandidate = (event) => {
+      if (!event.candidate) return;
+      const cand = event.candidate.candidate;
+      if (cand.includes(".local")) mdnsObserved = true;
+      const match = cand.match(/([0-9]{1,3}(\.[0-9]{1,3}){3})/);
+      if (match && match[1] !== "127.0.0.1") ips.add(match[1]);
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise(r => setTimeout(r, 10));
+    pc.close();
+  }
+
+  const privateIPs = Array.from(ips);
+  let subnetMask = "255.255.255.0", defaultGateway = null, networkId = null;
+  if (privateIPs.length > 0) {
+    const parts = privateIPs[0].split(".").map(Number);
+    if (parts[0] === 10) subnetMask = "255.0.0.0";
+    else if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) subnetMask = "255.240.0.0";
+    else if (parts[0] === 192 && parts[1] === 168) subnetMask = "255.255.255.0";
+    networkId = `${parts[0]}.${parts[1]}.${parts[2]}`;
+    defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
+  }
+
+  const publicIP = await detectPublicIP();
+
+  // --- Render hasil ---
+  output.className = '';
+  output.textContent = '';
+
+  const privateDiv = document.createElement('div');
+  privateDiv.className = 'header';
+  privateDiv.textContent = 'Informasi IP Privat';
+  output.appendChild(privateDiv);
+
+  const privateTable = document.createElement('table');
+  privateTable.className = 'network-table';
+  if (privateIPs.length > 0) privateTable.insertRow().innerHTML = `<th>Private IP(s)</th><td>${privateIPs.join(", ")}</td>`;
+  privateTable.insertRow().innerHTML = `<th>Subnet Mask</th><td>${subnetMask}</td>`;
+  privateTable.insertRow().innerHTML = `<th>Default Gateway</th><td>${defaultGateway}</td>`;
+  privateTable.insertRow().innerHTML = `<th>Network ID</th><td>${networkId}</td>`;
+  if (mdnsObserved) privateTable.insertRow().innerHTML = `<th>Status</th><td>Browser menyamarkan IP lokal (mDNS)</td>`;
+  output.appendChild(privateTable);
+
+  const publicDiv = document.createElement('div');
+  publicDiv.className = 'header';
+  publicDiv.textContent = 'Informasi IP Publik';
+  output.appendChild(publicDiv);
+
+  const publicTable = document.createElement('table');
+  publicTable.className = 'network-table';
+  publicTable.insertRow().innerHTML = `<th>Public IP</th><td>${publicIP}</td>`;
+  output.appendChild(publicTable);
+
+  // --- Cek SSID di Supabase ---
+  const ssid = document.getElementById('ssidInput').value.trim();
+  if (ssid) {
+    const { data } = await supabase.from('user_network').select('*').eq('ssid', ssid).single();
+    if (data) {
+      const ssidDiv = document.createElement('div');
+      ssidDiv.className = 'header';
+      ssidDiv.textContent = 'Informasi SSID';
+      output.appendChild(ssidDiv);
+
+      const ssidTable = document.createElement('table');
+      ssidTable.className = 'network-table';
+      ssidTable.insertRow().innerHTML = `<th>SSID</th><td>${data.ssid}</td>`;
+      ssidTable.insertRow().innerHTML = `<th>IP terakhir</th><td>${data.ip_address}</td>`;
+      ssidTable.insertRow().innerHTML = `<th>Last seen</th><td>${data.last_seen}</td>`;
+      output.appendChild(ssidTable);
     }
-
-    const privateIPs = Array.from(ips);
-    let subnetMask = "255.255.255.0", defaultGateway = null, networkId = null;
-    if (privateIPs.length > 0) {
-        const parts = privateIPs[0].split(".").map(Number);
-        if (parts[0] === 10) subnetMask = "255.0.0.0";
-        else if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) subnetMask = "255.240.0.0";
-        else if (parts[0] === 192 && parts[1] === 168) subnetMask = "255.255.255.0";
-        networkId = `${parts[0]}.${parts[1]}.${parts[2]}`;
-        defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
-    }
-
-    // --- IP Publik via fetch ---
-    async function getPublicIP() {
-        try {
-            const res = await fetch('https://api.ipify.org?format=json');
-            const data = await res.json();
-            if (data.ip) return data.ip;
-        } catch {}
-        return "Tidak dapat dideteksi";
-    }
-    const publicIP = await getPublicIP();
-
-    // --- Info dari Backend via WebSocket ---
-    let backendInfo = null;
-    try {
-        backendInfo = await new Promise((resolve, reject) => {
-            const ws = new WebSocket("wss://7gtq56-10000.csb.app"); // ganti sesuai backend
-            ws.onopen = () => ws.send("getNetworkInfo");
-            ws.onmessage = (event) => {
-                try { resolve(JSON.parse(event.data)); } 
-                catch { resolve({error: "Data tidak valid"}); }
-                ws.close();
-            };
-            ws.onerror = (err) => reject(err);
-        });
-    } catch (e) {
-        backendInfo = { error: "Tidak bisa terhubung ke backend" };
-    }
-
-    // --- Render Hasil ---
-    output.className = '';
-    output.textContent = '';
-
-    // Private IP
-    const privateDiv = document.createElement('div');
-    privateDiv.className = "header";
-    privateDiv.textContent = "Informasi IP Privat";
-    output.appendChild(privateDiv);
-
-    const privateTable = document.createElement('table');
-    privateTable.className = "network-table";
-    if (privateIPs.length > 0) privateTable.insertRow().innerHTML = `<th>Private IP(s)</th><td>${privateIPs.join(", ")}</td>`;
-    if (subnetMask) privateTable.insertRow().innerHTML = `<th>Subnet Mask</th><td>${subnetMask}</td>`;
-    if (defaultGateway) privateTable.insertRow().innerHTML = `<th>Default Gateway</th><td>${defaultGateway}</td>`;
-    if (networkId) privateTable.insertRow().innerHTML = `<th>Network ID</th><td>${networkId}</td>`;
-    if (mdnsObserved) privateTable.insertRow().innerHTML = `<th>Status</th><td>Browser menyamarkan IP lokal (mDNS)</td>`;
-    output.appendChild(privateTable);
-
-    // Public IP
-    const publicDiv = document.createElement('div');
-    publicDiv.className = "header";
-    publicDiv.textContent = "Informasi IP Publik";
-    output.appendChild(publicDiv);
-
-    const publicTable = document.createElement('table');
-    publicTable.className = "network-table";
-    publicTable.insertRow().innerHTML = `<th>Public IP</th><td>${publicIP}</td>`;
-    output.appendChild(publicTable);
-
-    // Backend Info
-    const backendDiv = document.createElement('div');
-    backendDiv.className = "header";
-    backendDiv.textContent = "Informasi dari Backend";
-    output.appendChild(backendDiv);
-
-    const backendTable = document.createElement('table');
-    backendTable.className = "network-table";
-    if (backendInfo.error) {
-        backendTable.insertRow().innerHTML = `<th>Error</th><td>${backendInfo.error}</td>`;
-    } else {
-        Object.keys(backendInfo).forEach(key => {
-            backendTable.insertRow().innerHTML = `<th>${key}</th><td>${backendInfo[key]}</td>`;
-        });
-    }
-    output.appendChild(backendTable);
+  }
 }
 </script>
 
