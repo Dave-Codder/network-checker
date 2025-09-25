@@ -134,7 +134,7 @@
       const publicIP = pubData.ip || "-";
 
       // 🔹 2. Ambil info detail dari backend (agent.js atau network.js)
-      const netRes = await fetch("http://localhost:5000/network"); // ganti sesuai URL backend
+      const netRes = await fetch("http://localhost:5000/agent.js"); // ganti sesuai URL backend
       const netData = await netRes.json();
 
       // 🔹 3. Gabungkan data
