@@ -77,97 +77,125 @@
 </body>
 
   <script>
-    // --- Konfigurasi Supabase ---
-    const supabaseUrl = 'https://bbsrfxzdiocqnkpxbgvj.supabase.co';
-    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJic3JmeHpkaW9jcW5rcHhiZ3ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg3Mjg4NjIsImV4cCI6MjA3NDMwNDg2Mn0.hDSjMPDLp9IyzbO6Zs2VeeK5Hh-BkxIobtG92KUHK4U'; // pakai key kamu
-    const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+    const outputDiv = document.getElementById('output');
+    const fetchBtn = document.getElementById('fetchBtn');
 
-    // --- Ambil IP Publik via IPfy ---
-    async function getPublicIP() {
+    // --- Fungsi Utama untuk Mengambil dan Menampilkan Info Jaringan ---
+    async function getAndDisplayNetworkInfo() {
+      outputDiv.className = 'loading';
+      outputDiv.textContent = 'Mendeteksi informasi jaringan...';
+      fetchBtn.disabled = true;
+
       try {
-        const res = await fetch(`https://ipinfo.io/json?token=7de3e574f56ab3`);
-        const data = await res.json();
-        return data.ip;
-      } catch (e) {
-        console.error("Gagal ambil IP publik:", e);
-        return "Tidak terdeteksi";
+        // Jalankan semua proses pengambilan data secara paralel
+        const [publicIPData, privateIPs, backendData] = await Promise.all([
+          fetch('https://ipinfo.io/json?token=7de3e574f56ab3').then(res => res.json()),
+          getPrivateIPsViaWebRTC(),
+          fetch('/api/network').then(res => res.json())
+        ]);
+
+        // Gabungkan hasil
+        const combinedData = {
+          publicIP: publicIPData.ip || 'Tidak terdeteksi',
+          privateIPs: privateIPs,
+          subnetMask: backendData.subnetMask || 'Tidak terdeteksi',
+          gateway: backendData.defaultGateway || 'Tidak terdeteksi',
+        };
+
+        // Hitung Network ID
+        combinedData.networkId = calculateNetworkId(privateIPs[0] || backendData.ipv4, combinedData.subnetMask);
+
+        renderResults(combinedData);
+
+      } catch (error) {
+        console.error('Gagal mengambil informasi jaringan:', error);
+        outputDiv.className = 'error';
+        outputDiv.innerHTML = `❌ Terjadi kesalahan: ${error.message}.<br>Pastikan Anda menjalankan ini dari server pengembangan (vercel dev) atau setelah di-deploy.`;
+      } finally {
+        fetchBtn.disabled = false;
       }
     }
 
-    // --- Ambil IP Private via WebRTC ---
-    function getPrivateIPs() {
-      return new Promise(resolve => {
+    // --- Ambil IP Privat via WebRTC ---
+    function getPrivateIPsViaWebRTC() {
+      return new Promise((resolve, reject) => {
         const RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection;
-        if (!RTCPeerConnection) return resolve([]);
+        if (!RTCPeerConnection) {
+          return resolve(['Tidak didukung oleh browser']);
+        }
+        
         const ips = new Set();
         const pc = new RTCPeerConnection({ iceServers: [] });
-        pc.createDataChannel("x");
+        pc.createDataChannel('');
+
         pc.onicecandidate = (event) => {
-          if (!event.candidate) return;
-          const match = event.candidate.candidate.match(/([0-9]{1,3}(\.[0-9]{1,3}){3})/);
-          if (match && match[1] !== "127.0.0.1") ips.add(match[1]);
+          if (event.candidate && event.candidate.candidate) {
+            const match = event.candidate.candidate.match(/([0-9]{1,3}(\.[0-9]{1,3}){3})/);
+            if (match && match[1] && match[1] !== '127.0.0.1') {
+              ips.add(match[1]);
+            }
+          } else {
+            // Kandidat selesai dikumpulkan
+            pc.close();
+            if (ips.size > 0) {
+              resolve([...ips]);
+            } else {
+              // Beri sedikit waktu lagi jika belum ada
+              setTimeout(() => {
+                pc.close();
+                resolve(ips.size > 0 ? [...ips] : ['Tidak terdeteksi']);
+              }, 1000);
+            }
+          }
         };
-        pc.createOffer().then(o => pc.setLocalDescription(o));
-        setTimeout(() => { pc.close(); resolve([...ips]); }, 500);
+        
+        pc.createOffer()
+          .then(offer => pc.setLocalDescription(offer))
+          .catch(err => {
+            console.error("WebRTC offer error:", err);
+            reject(err);
+          });
+
+        // Timeout untuk memastikan promise selesai
+        setTimeout(() => {
+            pc.close();
+            resolve(ips.size > 0 ? [...ips] : ['Tidak terdeteksi']);
+        }, 2000);
       });
     }
 
-    // --- Render tabel hasil ---
+    // --- Hitung Network ID ---
+    function calculateNetworkId(ip, subnetMask) {
+      if (!ip || !subnetMask || ip.includes('Tidak') || subnetMask.includes('Tidak')) {
+        return 'Tidak dapat dihitung';
+      }
+      try {
+        const ipParts = ip.split('.').map(Number);
+        const maskParts = subnetMask.split('.').map(Number);
+        const networkParts = ipParts.map((part, i) => part & maskParts[i]);
+        return networkParts.join('.');
+      } catch {
+        return 'Gagal menghitung';
+      }
+    }
+
+    // --- Render Tabel Hasil ---
     function renderResults(data) {
-      const output = document.getElementById('output');
-      output.className = '';
-      output.innerHTML = `
+      outputDiv.className = '';
+      outputDiv.innerHTML = `
         <table class="network-table">
           <tr><th>IP Publik</th><td>${data.publicIP}</td></tr>
-          <tr><th>IP Privat</th><td>${data.privateIPs.length ? data.privateIPs.join(', ') : 'Tidak terdeteksi'}</td></tr>
+          <tr><th>IP Privat (WebRTC)</th><td>${data.privateIPs.join(', ')}</td></tr>
           <tr><th>Subnet Mask</th><td>${data.subnetMask}</td></tr>
           <tr><th>Default Gateway</th><td>${data.gateway}</td></tr>
           <tr><th>Network ID</th><td>${data.networkId}</td></tr>
         </table>
       `;
     }
-  async function fetchNetworkInfo() {
-    try {
-      // 🔹 1. Ambil IP Publik
-      const pubRes = await fetch("https://ipinfo.io/json?token=7de3e574f56ab3");
-      const pubData = await pubRes.json();
-      const publicIP = pubData.ip || "-";
 
-      // 🔹 2. Ambil info detail dari backend (agent.js atau network.js)
-      const netRes = await fetch("http://localhost:5000/agent.js"); // ganti sesuai URL backend
-      const netData = await netRes.json();
-
-      // 🔹 3. Gabungkan data
-      const networkInfo = {
-        ssid: netData.ssid || "Unknown",
-        ip_address: publicIP,
-        ipv4: netData.ipv4,
-        subnetMask: netData.subnetMask,
-        defaultGateway: netData.defaultGateway,
-        dhcpServer: netData.dhcpServer,
-        dnsServers: netData.dnsServers,
-        leaseObtained: netData.leaseObtained,
-        leaseExpires: netData.leaseExpires,
-      };
-      console.log("Network Info:", networkInfo);
-
-      // 🔹 4. Simpan ke Supabase
-      const { error } = await supabaseClient.from("user_network").insert({
-        ssid: networkInfo.ssid,
-        ip_address: networkInfo.ip_address,
-        last_seen: new Date().toISOString()
-      });
-      if (error) throw error;
-
-      alert("✅ Data jaringan berhasil disimpan ke Supabase!");
-    } catch (err) {
-      console.error("❌ Gagal ambil info jaringan:", err);
-    }
-  }
-
-  // Jalankan saat tombol diklik
-  document.addEventListener("DOMContentLoaded", () => {
-    document.getElementById("fetchBtn").addEventListener("click", fetchNetworkInfo);
-  });
-</script>
+    // --- Event Listener ---
+    document.addEventListener('DOMContentLoaded', () => {
+      fetchBtn.addEventListener('click', getAndDisplayNetworkInfo);
+    });
+  </script>
 </html>
