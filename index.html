@@ -24,24 +24,18 @@ h1 { color: #2c3e50; text-align: center; margin-bottom: 20px; border-bottom: 2px
 <div class="container">
 <h1>Network Checker 🕵️‍♂️</h1>
 <div id="output" class="loading">Klik tombol di bawah untuk memulai deteksi jaringan...</div>
+
 <div style="margin-top: 20px;">
   <label for="ssidInput"><b>SSID:</b></label>
-<div style="margin-top: 20px; display:flex; gap:10px; align-items:center;">
   <input 
     type="text" 
     id="ssidInput" 
     placeholder="Masukkan nama WiFi (SSID)" 
-    style="flex:1; padding:10px; border-radius:6px; border:1px solid #ccc; font-size:14px;"
+    style="width:100%; margin-top:10px; padding:10px; border-radius:6px; border:1px solid #ccc; font-size:14px;"
   >
-  <button 
-    id="saveSSIDBtn" 
-    style="padding:10px 20px; border:none; background-color:#3498db; color:white; border-radius:6px; cursor:pointer; font-size:14px;"
-    onclick="saveSSID()"
-  >💾 Simpan</button>
+  <div id="ssidStatus" style="margin-top:10px; font-size:13px;"></div>
 </div>
-<div id="ssidStatus" style="margin-top:10px; font-size:13px;"></div>
 
-</div>
 <button class="refresh-button" onclick="detectNetwork()">Deteksi Sekarang</button>
 </div>
 
@@ -51,45 +45,7 @@ const supabaseUrl = 'https://bbsrfxzdiocqnkpxbgvj.supabase.co';
 const supabaseKey = 'sb_publishable_fZZac4_6V984F8q7es5vRQ_eAXtqUdb';
 const supabase = Supabase.createClient(supabaseUrl, supabaseKey);
 
-// --- Fungsi untuk menyimpan SSID ke Supabase ---
-async function saveSSID() {
-    const ssid = document.getElementById('ssidInput').value.trim();
-    const statusDiv = document.getElementById('ssidStatus');
-    statusDiv.textContent = '';
-
-    if (!ssid) {
-        statusDiv.textContent = '⚠️ SSID tidak boleh kosong.';
-        statusDiv.style.color = 'red';
-        return;
-    }
-
-    try {
-        // Pastikan Supabase sudah diinisialisasi
-        if (!supabase) throw new Error('Supabase belum diinisialisasi!');
-
-        const ip = await detectPublicIP();
-        const now = new Date().toISOString();
-
-        const { error } = await supabase.from('user_network')
-            .upsert({
-                ssid: ssid,
-                ip_address: ip,
-                last_seen: now
-            }, { onConflict: ['ssid'] });
-
-        if (error) throw error;
-
-        statusDiv.textContent = `✅ SSID "${ssid}" berhasil disimpan dengan IP publik ${ip}.`;
-        statusDiv.style.color = 'green';
-    } catch (err) {
-        console.error(err);
-        statusDiv.textContent = `❌ Gagal menyimpan SSID: ${err.message}`;
-        statusDiv.style.color = 'red';
-    }
-}
-
-
-// --- Fungsi untuk mengambil IP Publik dari API ipify ---
+// --- Fungsi untuk mengambil IP Publik ---
 async function detectPublicIP() {
     try {
         const response = await fetch('https://api.ipify.org?format=json');
@@ -105,8 +61,10 @@ async function detectPublicIP() {
 // --- Fungsi utama untuk mendeteksi semua informasi jaringan ---
 async function detectNetwork() {
     const output = document.getElementById('output');
+    const statusDiv = document.getElementById('ssidStatus');
     output.className = 'loading';
     output.textContent = 'Mendeteksi informasi jaringan, mohon tunggu...';
+    statusDiv.textContent = '';
 
     // 1. Dapatkan IP Publik
     const publicIP = await detectPublicIP();
@@ -114,35 +72,26 @@ async function detectNetwork() {
     // 2. Dapatkan IP Privat via WebRTC
     const privateIPs = await detectPrivateIPs();
 
-    // 3. Hitung informasi jaringan lainnya (estimasi)
+    // 3. Hitung informasi jaringan lainnya
     let subnetMask = "Tidak dapat diestimasi", defaultGateway = "Tidak dapat diestimasi", networkId = "Tidak dapat diestimasi";
     if (privateIPs.all.length > 0) {
-        const primaryIP = privateIPs.all[0]; // Gunakan IP pertama sebagai referensi
+        const primaryIP = privateIPs.all[0];
         const ipParts = primaryIP.split(".").map(Number);
         let maskParts;
 
-        // Estimasi subnet mask berdasarkan kelas IP privat yang umum
-        if (ipParts[0] === 10) {
-            maskParts = [255, 0, 0, 0]; // Umum untuk Kelas A
-        } else if (ipParts[0] === 172 && ipParts[1] >= 16 && ipParts[1] <= 31) {
-            maskParts = [255, 255, 0, 0]; // Asumsi umum /16 untuk jaringan lokal
-        } else if (ipParts[0] === 192 && ipParts[1] === 168) {
-            maskParts = [255, 255, 255, 0]; // Paling umum untuk jaringan rumahan/kecil
-        }
+        if (ipParts[0] === 10) maskParts = [255, 0, 0, 0];
+        else if (ipParts[0] === 172 && ipParts[1] >= 16 && ipParts[1] <= 31) maskParts = [255, 255, 0, 0];
+        else if (ipParts[0] === 192 && ipParts[1] === 168) maskParts = [255, 255, 255, 0];
 
         if (maskParts) {
             subnetMask = maskParts.join('.');
-            
-            // --- PERBAIKAN: Perhitungan Network ID yang akurat menggunakan bitwise AND ---
             const networkIdParts = ipParts.map((part, index) => part & maskParts[index]);
             networkId = networkIdParts.join('.');
-
-            // Estimasi Default Gateway (biasanya alamat .1 di dalam network ID)
             defaultGateway = `${networkIdParts[0]}.${networkIdParts[1]}.${networkIdParts[2]}.1`;
         }
     }
 
-    // 4. Render semua hasil ke HTML
+    // 4. Render hasil ke HTML
     renderResults({
         publicIP,
         privateIPs,
@@ -151,14 +100,29 @@ async function detectNetwork() {
         networkId
     });
 
-    // 5. Cek SSID di Supabase jika ada input
+    // 5. Simpan SSID otomatis ke Supabase jika diisi
     const ssid = document.getElementById('ssidInput').value.trim();
     if (ssid) {
-        checkSSIDinSupabase(ssid);
+        try {
+            const now = new Date().toISOString();
+            const { error } = await supabase.from('user_network').upsert({
+                ssid: ssid,
+                ip_address: publicIP,
+                last_seen: now
+            }, { onConflict: ['ssid'] });
+
+            if (error) throw error;
+            statusDiv.textContent = `✅ SSID "${ssid}" berhasil disimpan dengan IP ${publicIP}`;
+            statusDiv.style.color = 'green';
+        } catch (err) {
+            console.error(err);
+            statusDiv.textContent = `❌ Gagal menyimpan SSID: ${err.message}`;
+            statusDiv.style.color = 'red';
+        }
     }
 }
 
-// --- Fungsi terpisah untuk deteksi IP Privat ---
+// --- Deteksi IP Privat ---
 function detectPrivateIPs() {
     return new Promise(resolve => {
         const RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection;
@@ -181,22 +145,19 @@ function detectPrivateIPs() {
 
         pc.createDataChannel("test");
         pc.createOffer().then(offer => pc.setLocalDescription(offer));
-
-        // Tunggu sebentar agar kandidat ICE terkumpul
         setTimeout(() => {
             pc.close();
             resolve({ all: Array.from(ips), mdnsObserved });
-        }, 500); // Waktu tunggu sedikit lebih lama untuk hasil lebih andal
+        }, 500);
     });
 }
 
-// --- Fungsi terpisah untuk merender hasil ke tabel ---
+// --- Render hasil ke tabel ---
 function renderResults(data) {
     const output = document.getElementById('output');
-    output.innerHTML = ''; // Kosongkan output
+    output.innerHTML = '';
     output.className = '';
 
-    // Tabel IP Privat
     let privateHtml = `
         <div class="header">Informasi IP Privat (Lokal)</div>
         <table class="network-table">
@@ -207,7 +168,6 @@ function renderResults(data) {
             ${data.privateIPs.mdnsObserved ? `<tr><th>Status Privasi</th><td>⚠️ Browser mungkin menyamarkan IP lokal (mDNS)</td></tr>` : ''}
         </table>`;
 
-    // Tabel IP Publik
     let publicHtml = `
         <div class="header">Informasi IP Publik</div>
         <table class="network-table">
@@ -215,25 +175,6 @@ function renderResults(data) {
         </table>`;
 
     output.innerHTML = privateHtml + publicHtml;
-}
-
-// --- Fungsi terpisah untuk cek SSID di Supabase ---
-async function checkSSIDinSupabase(ssid) {
-    const { data, error } = await supabase.from('user_network').select('*').eq('ssid', ssid).single();
-    
-    if (data) {
-        const output = document.getElementById('output');
-        const lastSeenDate = new Date(data.last_seen).toLocaleString('id-ID');
-
-        let ssidHtml = `
-            <div class="header">Informasi SSID dari Database</div>
-            <table class="network-table">
-                <tr><th>SSID Tersimpan</th><td>${data.ssid}</td></tr>
-                <tr><th>IP Terakhir Terlihat</th><td>${data.ip_address}</td></tr>
-                <tr><th>Waktu Terakhir Terlihat</th><td>${lastSeenDate}</td></tr>
-            </table>`;
-        output.innerHTML += ssidHtml;
-    }
 }
 </script>
 
