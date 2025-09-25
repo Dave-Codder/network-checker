@@ -1,179 +1,416 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Network Checker</title>
+  <meta charset="utf-8">
+  <title>Network Info</title>
   <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
-    .container { background-color: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
-    h1 { color: #2c3e50; text-align: center; margin-bottom: 20px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
-    .network-table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #f8f9fa; border-radius: 4px; overflow: hidden; }
-    .network-table th, .network-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #dee2e6; }
-    .network-table th { background-color: #e9ecef; font-weight: 600; color: #495057; width: 40%; }
-    .network-table tr:last-child td { border-bottom: none; }
-    .loading { text-align: center; color: #666; font-style: italic; padding: 20px; }
-    .error { color: #dc3545; background-color: #ffe6e6; border: 1px solid #dc3545; padding: 10px; border-radius: 4px; margin-top: 10px; }
-    .refresh-button { display: block; margin: 20px auto 0; padding: 10px 20px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
-    .refresh-button:hover { background-color: #2980b9; }
-    .header { font-size: 18px; font-weight: 600; margin-top: 20px; color: #2c3e50; border-bottom: 1px solid #3498db; padding-bottom: 5px; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .container {
+      background-color: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      color: #2c3e50;
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+
+    .network-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background-color: #f8f9fa;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .network-table th,
+    .network-table td {
+      padding: 12px 15px;
+      text-align: left;
+      border-bottom: 1px solid #dee2e6;
+    }
+
+    .network-table th {
+      background-color: #e9ecef;
+      font-weight: 600;
+      color: #495057;
+    }
+
+    .network-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .network-table tr:hover td {
+      background-color: #f2f2f2;
+    }
+
+    .loading {
+      text-align: center;
+      color: #666;
+      font-style: italic;
+      padding: 20px;
+    }
+
+    .error {
+      color: #dc3545;
+      background-color: #ffe6e6;
+      border: 1px solid #dc3545;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+
+    .refresh-button {
+      display: block;
+      margin: 20px auto 0;
+      padding: 10px 20px;
+      background-color: #3498db;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+
+    .refresh-button:hover {
+      background-color: #2980b9;
+    }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 </head>
 <body>
   <div class="container">
-    <h1>Network Checker 🕵️‍♂️</h1>
-    <div id="output" class="loading">Klik tombol di bawah untuk memulai deteksi jaringan...</div>
-    <div style="margin-top: 20px;">
-      <label for="ssidInput"><b>SSID:</b></label>
-      <input 
-        type="text" 
-        id="ssidInput" 
-        placeholder="Masukkan nama WiFi (SSID)" 
-        style="width:100%; margin-top:10px; padding:10px; border-radius:6px; border:1px solid #ccc; font-size:14px;"
-      >
-      <div id="ssidStatus" style="margin-top:10px; font-size:13px;"></div>
-    </div>
-    <button class="refresh-button" onclick="detectNetwork()">Deteksi Sekarang</button>
+    <h1>Network Information</h1>
+    <div id="output" class="loading">Loading...</div>
+    <button class="refresh-button" onclick="fetchNetworkInfo()">Refresh Data</button>
   </div>
 
   <script>
-    // --- Konfigurasi Supabase ---
-    const supabaseUrl = 'https://bbsrfxzdiocqnkpxbgvj.supabase.co';
-    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJic3JmeHpkaW9jcW5rcHhiZ3ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg3Mjg4NjIsImV4cCI6MjA3NDMwNDg2Mn0.hDSjMPDLp9IyzbO6Zs2VeeK5Hh-BkxIobtG92KUHK4U';
-    const supabase = supabase.createClient(supabaseUrl, supabaseKey);
-
-    // --- Fungsi untuk mengambil IP Publik ---
-    async function detectPublicIP() {
+    async function getLocalNetworkInfo() {
       try {
-        const response = await fetch('https://api.ipify.org?format=json');
-        if (!response.ok) throw new Error('Gagal menghubungi API');
-        const data = await response.json();
-        return data.ip;
-      } catch (error) {
-        console.error("Gagal mendeteksi IP Publik:", error);
-        return "Tidak dapat dideteksi";
-      }
-    }
-
-    // --- Fungsi utama untuk mendeteksi semua informasi jaringan ---
-    async function detectNetwork() {
-      const output = document.getElementById('output');
-      const statusDiv = document.getElementById('ssidStatus');
-      output.className = 'loading';
-      output.textContent = 'Mendeteksi informasi jaringan, mohon tunggu...';
-      statusDiv.textContent = '';
-
-      // 1. Dapatkan IP Publik
-      const publicIP = await detectPublicIP();
-      
-      // 2. Dapatkan IP Privat via WebRTC
-      const privateIPs = await detectPrivateIPs();
-
-      // 3. Hitung informasi jaringan lainnya
-      let subnetMask = "Tidak dapat diestimasi", defaultGateway = "Tidak dapat diestimasi", networkId = "Tidak dapat diestimasi";
-      if (privateIPs.all.length > 0) {
-        const primaryIP = privateIPs.all[0];
-        const ipParts = primaryIP.split(".").map(Number);
-        let maskParts;
-
-        if (ipParts[0] === 10) maskParts = [255, 0, 0, 0];
-        else if (ipParts[0] === 172 && ipParts[1] >= 16 && ipParts[1] <= 31) maskParts = [255, 240, 0, 0];
-        else if (ipParts[0] === 192 && ipParts[1] === 168) maskParts = [255, 255, 255, 0];
-
-        if (maskParts) {
-          subnetMask = maskParts.join('.');
-          const networkIdParts = ipParts.map((part, index) => part & maskParts[index]);
-          networkId = networkIdParts.join('.');
-          defaultGateway = `${networkIdParts[0]}.${networkIdParts[1]}.${networkIdParts[2]}.1`;
-        }
-      }
-
-      // 4. Render hasil ke HTML
-      renderResults({
-        publicIP,
-        privateIPs,
-        subnetMask,
-        defaultGateway,
-        networkId
-      });
-
-      // 5. Simpan SSID otomatis ke Supabase jika diisi
-      const ssid = document.getElementById('ssidInput').value.trim();
-      if (ssid) {
-        try {
-          const now = new Date().toISOString();
-          const { error } = await supabase.from('user_network').upsert({
-            ssid: ssid,
-            ip_address: publicIP,
-            last_seen: now
-          }, { onConflict: ['ssid'] });
-
-          if (error) throw error;
-          statusDiv.textContent = `✅ SSID "${ssid}" berhasil disimpan dengan IP ${publicIP}`;
-          statusDiv.style.color = 'green';
-        } catch (err) {
-          console.error(err);
-          statusDiv.textContent = `❌ Gagal menyimpan SSID: ${err.message}`;
-          statusDiv.style.color = 'red';
-        }
-      }
-    }
-
-    // --- Deteksi IP Privat ---
-    function detectPrivateIPs() {
-      return new Promise(resolve => {
-        const RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection;
-        if (!RTCPeerConnection) return resolve({ all: [], mdnsObserved: false });
-
-        const pc = new RTCPeerConnection({ iceServers: [] });
-        const ips = new Set();
-        let mdnsObserved = false;
+        const networkInfo = {};
         
-        pc.onicecandidate = (event) => {
-          if (!event || !event.candidate) return;
-          const cand = event.candidate.candidate;
-          if (cand.includes(".local")) mdnsObserved = true;
-          
-          const match = cand.match(/([0-9]{1,3}(\.[0-9]{1,3}){3})/);
-          if (match && match[1] !== "127.0.0.1") {
-            ips.add(match[1]);
+        // Enhanced network info gathering using multiple methods
+        const gatherAllNetworkInfo = async () => {
+          // 1. Get detailed connection info
+          if (navigator.connection) {
+            const connection = navigator.connection;
+            networkInfo.type = connection.type;
+            networkInfo.effectiveType = connection.effectiveType;
+            networkInfo.downlinkMax = connection.downlinkMax;
+            networkInfo.downlink = connection.downlink;
+            networkInfo.rtt = connection.rtt;
           }
+
+          // 2. Enhanced WiFi info detection
+          try {
+            if ('getNetworkInformation' in navigator) {
+              const info = await navigator.getNetworkInformation();
+              networkInfo.ssid = info.ssid;
+              networkInfo.security = info.security;
+              networkInfo.signalStrength = info.signalStrength;
+            } else if (navigator.wifi) {
+              const wifiStatus = await navigator.wifi.getStatus();
+              networkInfo.ssid = wifiStatus.ssid;
+              networkInfo.signalStrength = wifiStatus.signalStrength;
+            }
+          } catch (e) {
+            console.warn('WiFi API not available:', e);
+          }
+
+          // 3. Enhanced IP detection using multiple RTCPeerConnection configurations
+          const getLocalIPs = async () => {
+            const ips = new Set();
+            const promises = [];
+
+            // Try multiple STUN servers for redundancy
+            const stunServers = [
+              'stun:stun.l.google.com:19302',
+              'stun:stun1.l.google.com:19302',
+              'stun:stun.services.mozilla.com'
+            ];
+
+            // Function to gather candidates from a specific configuration
+            const gatherFromConfig = async (iceServers) => {
+              return new Promise((resolve) => {
+                const pc = new RTCPeerConnection({ iceServers });
+                pc.createDataChannel('');
+                
+                pc.onicecandidate = (ice) => {
+                  if (!ice || !ice.candidate) return;
+                  
+                  // Look for IPv4 addresses in candidate
+                  const matches = [...ice.candidate.candidate.matchAll(/\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g)];
+                  
+                  matches.forEach(match => {
+                    const ip = match[0];
+                    // Filter private network IPs
+                    if (ip.match(/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/)) {
+                      ips.add(ip);
+                    }
+                  });
+                };
+
+                pc.createOffer()
+                  .then(offer => pc.setLocalDescription(offer))
+                  .catch(console.warn);
+
+                // Resolve after gathering or timeout
+                setTimeout(() => {
+                  try { pc.close(); } catch (e) {}
+                  resolve();
+                }, 1000);
+              });
+            };
+
+            // Try with no STUN first (local candidates only)
+            promises.push(gatherFromConfig([]));
+            
+            // Then try each STUN server
+            stunServers.forEach(server => {
+              promises.push(gatherFromConfig([{ urls: server }]));
+            });
+
+            await Promise.all(promises);
+            return Array.from(ips);
+          };
+
+          // 4. Get local IPs and additional info
+          const localIPs = await getLocalIPs();
+          if (localIPs.length > 0) {
+            networkInfo.ipAddress = localIPs[0]; // Primary IP
+            networkInfo.allLocalIPs = localIPs; // All discovered IPs
+            
+            // Derive subnet mask based on private network type
+            if (networkInfo.ipAddress.startsWith('192.168.')) {
+              networkInfo.subnetMask = '255.255.255.0';
+            } else if (networkInfo.ipAddress.startsWith('10.')) {
+              networkInfo.subnetMask = '255.0.0.0';
+            } else if (networkInfo.ipAddress.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)) {
+              networkInfo.subnetMask = '255.240.0.0';
+            }
+
+            // Extract network details
+            const ipParts = networkInfo.ipAddress.split('.');
+            networkInfo.networkId = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}`;
+            networkInfo.defaultGateway = `${networkInfo.networkId}.1`;
+          }
+
+          // 5. Try to detect DNS servers using WebRTC's internal DNS resolution
+          const detectDNS = async () => {
+            try {
+              const pc = new RTCPeerConnection();
+              const dc = pc.createDataChannel('');
+              
+              // Create a unique local candidate that will trigger DNS lookup
+              await pc.setLocalDescription(await pc.createOffer({
+                offerToReceiveAudio: 1,
+                offerToReceiveVideo: 1
+              }));
+
+              // DNS timing detection
+              const start = performance.now();
+              await new Promise(resolve => setTimeout(resolve, 100));
+              const dnsLatency = performance.now() - start;
+              
+              networkInfo.dnsLatency = Math.round(dnsLatency);
+              
+              pc.close();
+            } catch (e) {
+              console.warn('DNS detection failed:', e);
+            }
+          };
+          
+          await detectDNS();
         };
 
-        pc.createDataChannel("test");
-        pc.createOffer().then(offer => pc.setLocalDescription(offer));
-        setTimeout(() => {
-          pc.close();
-          resolve({ all: Array.from(ips), mdnsObserved });
-        }, 500);
+        // Run all network detection
+        await gatherAllNetworkInfo();
+        
+        // If no IP found, continue and UI will prompt user for manual input
+        return networkInfo;
+      } catch (error) {
+        console.error('Error getting local network info:', error);
+        return {};
+      }
+    }
+
+    // Manual input retired: detection is automatic
+
+    function createNetworkTable(data) {
+      const container = document.createElement('div');
+      
+      // Network Information Table
+      const networkTable = document.createElement('table');
+      networkTable.className = 'network-table';
+      container.appendChild(networkTable);
+
+      // Define the fields to display
+      const networkFields = [
+        { key: 'ssid', label: 'Network Name' },
+        // API returns 'ipv4' but older UI uses 'ipAddress' from local detection. Prefer API value when present.
+        { key: 'ipv4', label: 'IP Address' },
+        { key: 'subnetMask', label: 'Subnet Mask' },
+        { key: 'defaultGateway', label: 'Default Gateway' },
+        { key: 'dhcpServer', label: 'DHCP Server' },
+        { key: 'leaseObtained', label: 'Lease Obtained' },
+        { key: 'leaseExpires', label: 'Lease Expires' },
+        { key: 'dhcpv6Iaid', label: 'DHCPv6 IAID' },
+        { key: 'dhcpv6ClientDuid', label: 'DHCPv6 Client DUID' },
+        { key: 'connectionSpecificDnsSuffix', label: 'Connection-specific DNS Suffix' }
+      ];
+
+      // Add each field to the table
+      networkFields.forEach(({ key, label }) => {
+        const value = data[key] !== undefined && data[key] !== null ? data[key] : null;
+        if (value) {
+          const row = networkTable.insertRow();
+          row.insertCell(0).outerHTML = `<th>${label}</th>`;
+          row.insertCell(1).textContent = value;
+        }
       });
+
+      // DNS Servers (array) display specially
+      if (Array.isArray(data.dnsServers) && data.dnsServers.length > 0) {
+        const row = networkTable.insertRow();
+        row.insertCell(0).outerHTML = `<th>DNS Servers</th>`;
+        const cell = row.insertCell(1);
+        cell.innerHTML = data.dnsServers.map(s => `<div>${s}</div>`).join('');
+      }
+
+      // Add timestamp if available
+      if (data.timestamp) {
+        const timestamp = document.createElement('div');
+        timestamp.style.marginTop = '20px';
+        timestamp.style.textAlign = 'right';
+        timestamp.style.color = '#666';
+        timestamp.style.fontSize = '12px';
+        timestamp.textContent = 'Last updated: ' + new Date(data.timestamp).toLocaleString();
+        container.appendChild(timestamp);
+      }
+
+      return container;
     }
 
-    // --- Render hasil ke tabel ---
-    function renderResults(data) {
+    async function fetchNetworkInfo() {
       const output = document.getElementById('output');
-      output.innerHTML = '';
-      output.className = '';
+      let API_URL = '';
+      
+      try {
+        output.className = 'loading';
+        output.textContent = 'Loading...';
+        
+        // Get local network info first
+        const localNetworkInfo = await getLocalNetworkInfo();
 
-      let privateHtml = `
-        <div class="header">Informasi IP Privat (Lokal)</div>
-        <table class="network-table">
-          <tr><th>Semua IP Privat Terdeteksi</th><td>${data.privateIPs.all.length > 0 ? data.privateIPs.all.join(', ') : 'Tidak ada'}</td></tr>
-          <tr><th>Subnet Mask (Estimasi)</th><td>${data.subnetMask}</td></tr>
-          <tr><th>Default Gateway (Estimasi)</th><td>${data.defaultGateway}</td></tr>
-          <tr><th>Network ID (Dihitung)</th><td>${data.networkId}</td></tr>
-          ${data.privateIPs.mdnsObserved ? `<tr><th>Status Privasi</th><td>⚠️ Browser mungkin menyamarkan IP lokal (mDNS)</td></tr>` : ''}
-        </table>`;
+        // If automatic detection didn't return an IP, proceed and the server will use headers/derivation
 
-      let publicHtml = `
-        <div class="header">Informasi IP Publik</div>
-        <table class="network-table">
-          <tr><th>Alamat IP Publik</th><td>${data.publicIP}</td></tr>
-        </table>`;
+        // Determine API URL based on environment
+        if (window.location.hostname === 'localhost') {
+          API_URL = 'http://localhost:3000/api/network';
+        } else {
+          API_URL = '/api/network';
+        }
+        console.log('Fetching from:', API_URL);
 
-      output.innerHTML = privateHtml + publicHtml;
+        // Prepare enhanced network headers
+        const headers = {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache',
+          'X-Client-IP': localNetworkInfo.ipAddress || ''
+        };
+
+        // Add all detected network info as headers
+        if (localNetworkInfo.ssid) headers['X-Network-SSID'] = localNetworkInfo.ssid;
+        if (localNetworkInfo.type) headers['X-Network-Type'] = localNetworkInfo.type;
+        if (localNetworkInfo.subnetMask) headers['X-Network-SubnetMask'] = localNetworkInfo.subnetMask;
+        if (localNetworkInfo.defaultGateway) headers['X-Network-Gateway'] = localNetworkInfo.defaultGateway;
+        if (localNetworkInfo.networkId) headers['X-Network-ID'] = localNetworkInfo.networkId;
+        if (localNetworkInfo.signalStrength) headers['X-Network-Signal'] = localNetworkInfo.signalStrength;
+        if (localNetworkInfo.effectiveType) headers['X-Network-Speed'] = localNetworkInfo.effectiveType;
+        if (localNetworkInfo.allLocalIPs) headers['X-Network-All-IPs'] = localNetworkInfo.allLocalIPs.join(',');
+
+        const res = await fetch(API_URL, {
+          method: 'GET',
+          headers
+        });
+        
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          throw new Error('Response is not JSON');
+        }
+        const data = await res.json();
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        output.className = '';
+        output.textContent = '';
+        output.appendChild(createNetworkTable(data));
+      } catch (err) {
+        output.className = 'error';
+        console.error('Fetch error:', err); // Debug log
+        
+        if (err.message.includes('Failed to fetch') || err.message.includes('HTTP error')) {
+          output.innerHTML = `
+            <p>Error: Could not connect to the network information service.</p>
+            <p>Status: ${err.message}</p>
+            <p>URL: ${API_URL}</p>
+            <p>Please try refreshing the page. If the problem persists, the service might be temporarily unavailable.</p>
+            <button onclick="fetchNetworkInfo()" class="refresh-button">Try Again</button>
+          `;
+        } else {
+          output.textContent = 'Error: ' + err.message;
+        }
+      }
     }
+
+    async function fetchNetworkInfoWithIp(ip) {
+      const output = document.getElementById('output');
+      let API_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000/api/network' : '/api/network';
+      try {
+        output.className = 'loading';
+        output.textContent = 'Loading...';
+        const res = await fetch(API_URL, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Cache-Control': 'no-cache',
+            'X-Client-IP': ip
+          }
+        });
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const data = await res.json();
+        output.className = '';
+        output.textContent = '';
+        output.appendChild(createNetworkTable(data));
+      } catch (err) {
+        output.className = 'error';
+        output.textContent = 'Error: ' + err.message;
+      }
+    }
+    // Deprecated: fetchNetworkInfoWithIp remains for backward compatibility but not used by UI
+
+    // submitRawOutput removed — manual paste no longer supported
+
+    fetchNetworkInfo();
   </script>
 </body>
 </html>
