@@ -3,11 +3,6 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 
-// Initialize Supabase
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
 // CORS wrapper
 const allowCors = fn => async (req, res) => {
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -24,7 +19,7 @@ const allowCors = fn => async (req, res) => {
   return await fn(req, res);
 };
 
-// Parsing functions
+// Parsing functions (remains the same)
 function parseIpconfig(output) {
   const result = {};
   const reIPv4 = /IPv4 Address[\s.:]*([0-9.]+)(?:[^)]+)?/i;
@@ -50,36 +45,26 @@ function parseIpconfig(output) {
   if (mGW) result.defaultGateway = mGW[1].trim();
   const mDhcp = output.match(reDhcp);
   if (mDhcp) result.dhcpServer = mDhcp[1].trim();
-
-  // DHCPv6 IAID
   const mIaid = output.match(reDhcpV6Iaid);
   if (mIaid) result.dhcpv6Iaid = mIaid[1].trim();
-  // DHCPv6 Client DUID
   const mDuid = output.match(reDhcpV6Duid);
   if (mDuid) result.dhcpv6ClientDuid = mDuid[1].trim();
-
-  // DNS Servers: can be on multiple lines indented under the DNS Servers line
   const mDns = output.match(reDnsServers);
   if (mDns) {
     const first = mDns[1].trim();
     const dnsList = [first];
-    // look for subsequent indented DNS entries directly following the match
     const after = output.slice(output.indexOf(mDns[0]) + mDns[0].length);
     const lines = after.split(/\r?\n/);
     for (const ln of lines) {
       const trimmed = ln.trim();
       if (!trimmed) break;
-      // lines that start with a digit are additional servers
       if (/^[0-9]/.test(trimmed)) dnsList.push(trimmed.split(/\s+/)[0]);
       else break;
     }
     result.dnsServers = dnsList;
   }
-
-  // Connection-specific DNS Suffix
   const mSuffix = output.match(reConnSuffix);
   if (mSuffix) result.connectionSpecificDnsSuffix = mSuffix[1].trim();
-
   return result;
 }
 
@@ -95,94 +80,63 @@ const handler = async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET');
   res.setHeader('Content-Type', 'application/json');
 
+  // Check for all required environment variables
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_ANON_KEY || !process.env.IPINFO_TOKEN) {
+    return res.status(500).json({
+      error: 'Environment variables not set.',
+      message: 'Please ensure SUPABASE_URL, SUPABASE_ANON_KEY, and IPINFO_TOKEN are set in your Vercel project settings.'
+    });
+  }
+
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+
   try {
+    // Securely fetch public IP info from the backend
+    const ipinfoResponse = await fetch(`https://ipinfo.io/json?token=${process.env.IPINFO_TOKEN}`);
+    if (!ipinfoResponse.ok) {
+      throw new Error(`ipinfo.io API error: ${ipinfoResponse.statusText}`);
+    }
+    const publicIpData = await ipinfoResponse.json();
+    const publicIp = publicIpData.ip;
+
     let networkInfo;
 
-    // In production (Vercel or other non-Windows), use enhanced client network info
     if (process.platform !== 'win32') {
-      // Get network info from headers and query params
-      const clientInfo = {};
+      const { privateIp } = req.query;
       const ipv4Regex = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-      const rawIp = (req.headers['x-client-ip'] || req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || '').split(',')[0].trim();
-      const isIpv4 = ipv4Regex.test(rawIp) && rawIp.split('.').every(n => Number(n) >= 0 && Number(n) <= 255);
-      
-      // Parse additional network info from headers
-      try {
-        Object.keys(req.headers).forEach(key => {
-          if (key.toLowerCase().startsWith('x-network-')) {
-            const infoKey = key.slice('x-network-'.length).toLowerCase();
-            clientInfo[infoKey] = req.headers[key];
-          }
-        });
-      } catch (e) {
-        console.warn('Failed to parse network headers:', e);
-      }
+      const isPrivateIpv4 = ipv4Regex.test(privateIp);
+      let subnetMask = 'Tidak diketahui';
+      let defaultGateway = 'Tidak diketahui';
+      let networkId = 'Tidak diketahui';
 
-      // If we have a valid IP, derive network details
-      if (isIpv4) {
-        const parts = rawIp.split('.');
-        const networkId = `${parts[0]}.${parts[1]}.${parts[2]}`;
-        
-        // Smart network info derivation based on IP class
-        let subnetMask = '255.255.255.0'; // Default for class C
-        if (rawIp.startsWith('10.')) {
-          subnetMask = '255.0.0.0';  // Class A private
-        } else if (rawIp.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)) {
-          subnetMask = '255.240.0.0';  // Class B private
-        }
-        
-        // Derive gateway and network details
-        const defaultGateway = clientInfo.gateway || `${networkId}.1`;
-        
-        // Use client-provided DNS or fallback to gateway + Google DNS
-        const dnsServers = clientInfo.dnsServers ? 
-          clientInfo.dnsServers.split(',') :
-          [defaultGateway, '8.8.8.8'];
-        
-        networkInfo = {
-          ssid: clientInfo.ssid || null,
-          ipv4: rawIp,
-          subnetMask,
-          defaultGateway,
-          dhcpServer: clientInfo.dhcpServer || null, // don't assume DHCP = gateway
-          dnsServers,
-          connectionType: clientInfo.type || 'unknown',
-          signalStrength: clientInfo.signalStrength || null,
-          networkSpeed: clientInfo.speed || null,
-          leaseObtained: new Date().toISOString(),
-          leaseExpires: new Date(Date.now() + 24*60*60*1000).toISOString(), // +24h
-          timestamp: new Date().toISOString(),
-          note: 'Enhanced client network info from browser APIs'
-        };
-      } else {
-        // No valid IP detected
-        networkInfo = {
-          ssid: null,
-          ipv4: null,
-          subnetMask: null,
-          defaultGateway: null,
-          dhcpServer: null,
-          dnsServers: null,
-          connectionType: clientInfo.type || 'unknown',
-          signalStrength: null,
-          networkSpeed: null,
-          leaseObtained: null,
-          leaseExpires: null,
-          timestamp: new Date().toISOString(),
-          note: 'No valid client IPv4 detected'
-        };
+      if (isPrivateIpv4) {
+        if (privateIp.startsWith('10.')) subnetMask = '255.0.0.0';
+        else if (privateIp.startsWith('192.168.')) subnetMask = '255.255.255.0';
+        else if (privateIp.match(/^172\.(1[6-9]|2[0-9]|3[0-1])\./)) subnetMask = '255.240.0.0';
+        const parts = privateIp.split('.');
+        networkId = `${parts[0]}.${parts[1]}.${parts[2]}.0`;
+        defaultGateway = `${parts[0]}.${parts[1]}.${parts[2]}.1`;
       }
+      
+      networkInfo = {
+        ssid: req.query.ssid || null,
+        ipv4: privateIp || null,
+        publicIp: publicIp || null,
+        subnetMask: subnetMask,
+        defaultGateway: defaultGateway,
+        networkId: networkId,
+        dnsServers: [defaultGateway, '8.8.8.8'],
+        timestamp: new Date().toISOString(),
+        note: 'Data from client (WebRTC) via query parameters.'
+      };
     } else {
-        // Execute both commands
         let netshOutput = '';
         let ipOutput = '';
-
         try {
           const { stdout: netshStdout } = await execAsync('netsh wlan show interfaces');
           netshOutput = netshStdout;
         } catch (err) {
           console.warn('WLAN information not available:', err.message);
-          // Don't throw, continue without WLAN info
         }
 
         let ipInfo = {};
@@ -191,27 +145,17 @@ const handler = async (req, res) => {
           ipOutput = ipStdout;
           ipInfo = parseIpconfig(ipOutput);
         } catch (err) {
-          console.error('Failed to get IP configuration:', err.message);
-          return res.status(500).json({
-            error: 'Command execution failed',
-            message: 'Failed to get network information',
-            details: err.message
-          });
+          return res.status(500).json({ error: 'Command execution failed', message: 'Failed to get network information', details: err.message });
         }
 
-        // Ensure we have at least some data
         if (!ipInfo.ipv4) {
-          return res.status(404).json({
-            error: 'No data',
-            message: 'No network adapter information found'
-          });
+          return res.status(404).json({ error: 'No data', message: 'No network adapter information found' });
         }
 
-        // Parse and combine the results
         networkInfo = {
           ssid: parseSSID(netshOutput) || null,
           ipv4: ipInfo.ipv4 || null,
-          publicIp: req.query.publicIp || null, // Get public IP from query
+          publicIp: publicIp || null,
           subnetMask: ipInfo.subnetMask || null,
           defaultGateway: ipInfo.defaultGateway || null,
           dhcpServer: ipInfo.dhcpServer || null,
@@ -226,25 +170,16 @@ const handler = async (req, res) => {
         };
     }
 
-    // Save to Supabase
-    const { data, error } = await supabase
-      .from('network_info')
-      .insert([networkInfo]);
+    const { data, error } = await supabase.from('network_info').insert([networkInfo]);
 
     if (error) {
       console.error('Supabase error:', error);
-      return res.status(500).json({
-        error: 'Failed to save data to Supabase',
-        message: error.message
-      });
+      return res.status(500).json({ error: 'Failed to save data to Supabase', message: error.message });
     }
 
     res.status(200).json(networkInfo);
   } catch (error) {
-    res.status(500).json({
-      error: "Failed to get network information",
-      message: error.message
-    });
+    res.status(500).json({ error: "Failed to get network information", message: error.message });
   }
 };
 

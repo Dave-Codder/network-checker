@@ -87,36 +87,31 @@
       fetchBtn.disabled = true;
 
       try {
-        // 1. Ambil IP publik dan privat secara bersamaan
-        const [publicIPData, privateIPs] = await Promise.all([
-          fetch('https://ipinfo.io/json?token=7de3e574f56ab3').then(res => res.json()),
-          getPrivateIPsViaWebRTC()
-        ]);
-
-        const publicIP = publicIPData.ip || '';
+        // 1. Dapatkan hanya IP privat dari sisi klien
+        const privateIPs = await getPrivateIPsViaWebRTC();
         const privateIP = privateIPs[0] || '';
+        const ssid = document.getElementById('ssidInput').value || '';
 
-        // 2. Kirim data ke backend untuk diproses dan disimpan
-        // IP privat dan publik dikirim sebagai query parameter
-        const apiUrl = `/api/network?privateIp=${encodeURIComponent(privateIP)}&publicIp=${encodeURIComponent(publicIP)}`;
-        const backendData = await fetch(apiUrl).then(res => res.json());
+        // 2. Panggil backend, kirim IP privat dan SSID
+        const apiUrl = `/api/network?privateIp=${encodeURIComponent(privateIP)}&ssid=${encodeURIComponent(ssid)}`;
+        const response = await fetch(apiUrl);
+        const backendData = await response.json();
 
-        if (backendData.error) {
-          throw new Error(backendData.message || 'Gagal mengambil data dari backend.');
+        if (!response.ok) {
+          throw new Error(backendData.message || `Terjadi error di server: ${response.statusText}`);
         }
 
-        // 3. Gabungkan hasil untuk ditampilkan di frontend
-        const combinedData = {
-          publicIP: publicIP || 'Tidak terdeteksi',
-          privateIPs: privateIPs,
+        // 3. Render hasil yang diterima dari backend
+        // Backend sekarang menjadi satu-satunya sumber kebenaran
+        const displayData = {
+          publicIp: backendData.publicIp || 'Tidak terdeteksi',
+          privateIPs: privateIPs, // Tampilkan semua IP privat yang terdeteksi
           subnetMask: backendData.subnetMask || 'Tidak terdeteksi',
           gateway: backendData.defaultGateway || 'Tidak terdeteksi',
+          networkId: backendData.networkId || 'Tidak dapat dihitung'
         };
 
-        // Hitung Network ID
-        combinedData.networkId = calculateNetworkId(privateIP || backendData.ipv4, combinedData.subnetMask);
-
-        renderResults(combinedData);
+        renderResults(displayData);
 
       } catch (error) {
         console.error('Gagal mengambil informasi jaringan:', error);
@@ -195,7 +190,7 @@
       outputDiv.className = '';
       outputDiv.innerHTML = `
         <table class="network-table">
-          <tr><th>IP Publik</th><td>${data.publicIP}</td></tr>
+          <tr><th>IP Publik</th><td>${data.publicIp}</td></tr>
           <tr><th>IP Privat (WebRTC)</th><td>${data.privateIPs.join(', ')}</td></tr>
           <tr><th>Subnet Mask</th><td>${data.subnetMask}</td></tr>
           <tr><th>Default Gateway</th><td>${data.gateway}</td></tr>
