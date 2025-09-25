@@ -117,10 +117,14 @@
         // Backend sekarang menjadi satu-satunya sumber kebenaran
         const displayData = {
           publicIp: backendData.publicIp || 'Tidak terdeteksi',
-          privateIPs: privateIPs, // Tampilkan semua IP privat yang terdeteksi
+          privateIPs: privateIPs,
           subnetMask: backendData.subnetMask || 'Tidak terdeteksi',
           gateway: backendData.defaultGateway || 'Tidak terdeteksi',
-          networkId: backendData.networkId || 'Tidak dapat dihitung'
+          networkId: backendData.networkId || 'Tidak dapat dihitung',
+          city: backendData.city,
+          region: backendData.region,
+          country: backendData.country,
+          org: backendData.org
         };
 
         renderResults(displayData);
@@ -202,7 +206,10 @@
       outputDiv.className = '';
       outputDiv.innerHTML = `
         <table class="network-table">
-          <tr><th>IP Publik</th><td>${data.publicIp}</td></tr>
+          <tr><th>IP Publik</th><td>${data.publicIp || 'Tidak terdeteksi'}</td></tr>
+          <tr><th>Penyedia Jasa Internet</th><td>${data.org || 'Tidak terdeteksi'}</td></tr>
+          <tr><th>Lokasi</th><td>${[data.city, data.region, data.country].filter(Boolean).join(', ') || 'Tidak terdeteksi'}</td></tr>
+          <tr><td colspan="2" style="border: none; padding: 5px;"></td></tr>
           <tr><th>IP Privat (WebRTC)</th><td>${data.privateIPs.join(', ')}</td></tr>
           <tr><th>Subnet Mask</th><td>${data.subnetMask}</td></tr>
           <tr><th>Default Gateway</th><td>${data.gateway}</td></tr>
