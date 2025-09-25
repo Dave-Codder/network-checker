@@ -82,6 +82,19 @@
 
     // --- Fungsi Utama untuk Mengambil dan Menampilkan Info Jaringan ---
     async function getAndDisplayNetworkInfo() {
+      const ssidInput = document.getElementById('ssidInput');
+      const ssid = ssidInput.value.trim();
+
+      // Validasi input SSID
+      if (!ssid) {
+        outputDiv.className = 'error';
+        outputDiv.innerHTML = '❌ SSID tidak boleh kosong. Silakan masukkan nama WiFi Anda.';
+        ssidInput.style.border = '1px solid #dc3545'; // Highlight input box
+        return; // Hentikan eksekusi
+      }
+
+      // Reset style jika validasi berhasil
+      ssidInput.style.border = '1px solid #ccc';
       outputDiv.className = 'loading';
       outputDiv.textContent = 'Mendeteksi informasi jaringan...';
       fetchBtn.disabled = true;
@@ -90,9 +103,8 @@
         // 1. Dapatkan hanya IP privat dari sisi klien
         const privateIPs = await getPrivateIPsViaWebRTC();
         const privateIP = privateIPs[0] || '';
-        const ssid = document.getElementById('ssidInput').value || '';
-
-        // 2. Panggil backend, kirim IP privat dan SSID
+        
+        // 2. Panggil backend, kirim IP privat dan SSID (yang sudah divalidasi)
         const apiUrl = `/api/network?privateIp=${encodeURIComponent(privateIP)}&ssid=${encodeURIComponent(ssid)}`;
         const response = await fetch(apiUrl);
         const backendData = await response.json();
