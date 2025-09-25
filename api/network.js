@@ -91,13 +91,15 @@ const handler = async (req, res) => {
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
   try {
-    // Securely fetch public IP info from the backend
-    const ipinfoResponse = await fetch(`https://ipinfo.io/json?token=${process.env.IPINFO_TOKEN}`);
+    // Get the user's IP from headers. Vercel populates 'x-forwarded-for'.
+    const userIp = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'].split(',')[0] : '127.0.0.1';
+
+    // Securely fetch the USER's public IP info from the backend
+    const ipinfoResponse = await fetch(`https://ipinfo.io/${userIp}/json?token=${process.env.IPINFO_TOKEN}`);
     if (!ipinfoResponse.ok) {
       throw new Error(`ipinfo.io API error: ${ipinfoResponse.statusText}`);
     }
     const publicIpData = await ipinfoResponse.json();
-    const publicIp = publicIpData.ip;
 
     let networkInfo;
 
