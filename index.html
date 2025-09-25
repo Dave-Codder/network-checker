@@ -74,17 +74,18 @@
     </div>
     <button class="refresh-button" onclick="fetchNetworkInfo()">Refresh Data</button>
   </div>
+</body>
 
   <script>
     // --- Konfigurasi Supabase ---
     const supabaseUrl = 'https://bbsrfxzdiocqnkpxbgvj.supabase.co';
-    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'; // pakai key kamu
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJic3JmeHpkaW9jcW5rcHhiZ3ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg3Mjg4NjIsImV4cCI6MjA3NDMwNDg2Mn0.hDSjMPDLp9IyzbO6Zs2VeeK5Hh-BkxIobtG92KUHK4U'; // pakai key kamu
     const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
     // --- Ambil IP Publik via IPfy ---
     async function getPublicIP() {
       try {
-        const res = await fetch('https://api.ipify.org?format=json');
+        const res = await fetch(`https://ipinfo.io/json?token=7de3e574f56ab3`);
         const data = await res.json();
         return data.ip;
       } catch (e) {
@@ -125,54 +126,48 @@
         </table>
       `;
     }
+  async function fetchNetworkInfo() {
+    try {
+      // 🔹 1. Ambil IP Publik
+      const pubRes = await fetch("https://ipinfo.io/json?token=7de3e574f56ab3");
+      const pubData = await pubRes.json();
+      const publicIP = pubData.ip || "-";
 
-    // --- Fungsi utama ---
-    async function fetchNetworkInfo() {
-      const output = document.getElementById('output');
-      const ssidStatus = document.getElementById('ssidStatus');
-      output.className = 'loading';
-      output.textContent = 'Mendeteksi...';
+      // 🔹 2. Ambil info detail dari backend (agent.js atau network.js)
+      const netRes = await fetch("http://localhost:5000/network"); // ganti sesuai URL backend
+      const netData = await netRes.json();
 
-      // Ambil data
-      const publicIP = await getPublicIP();
-      const privateIPs = await getPrivateIPs();
+      // 🔹 3. Gabungkan data
+      const networkInfo = {
+        ssid: netData.ssid || "Unknown",
+        ip_address: publicIP,
+        ipv4: netData.ipv4,
+        subnetMask: netData.subnetMask,
+        defaultGateway: netData.defaultGateway,
+        dhcpServer: netData.dhcpServer,
+        dnsServers: netData.dnsServers,
+        leaseObtained: netData.leaseObtained,
+        leaseExpires: netData.leaseExpires,
+      };
+      console.log("Network Info:", networkInfo);
 
-      let subnetMask = "-", gateway = "-", networkId = "-";
-      if (privateIPs.length > 0) {
-        const ip = privateIPs[0].split(".").map(Number);
-        let mask;
-        if (ip[0] === 10) mask = [255,0,0,0];
-        else if (ip[0] === 172 && ip[1] >= 16 && ip[1] <= 31) mask = [255,240,0,0];
-        else if (ip[0] === 192 && ip[1] === 168) mask = [255,255,255,0];
-        if (mask) {
-          subnetMask = mask.join(".");
-          networkId = ip.map((p,i)=> p & mask[i]).join(".");
-          gateway = `${ip[0]}.${ip[1]}.${ip[2]}.1`;
-        }
-      }
+      // 🔹 4. Simpan ke Supabase
+      const { error } = await supabaseClient.from("user_network").insert({
+        ssid: networkInfo.ssid,
+        ip_address: networkInfo.ip_address,
+        last_seen: new Date().toISOString()
+      });
+      if (error) throw error;
 
-      renderResults({ publicIP, privateIPs, subnetMask, gateway, networkId });
-
-      // Simpan SSID ke Supabase
-      const ssid = document.getElementById('ssidInput').value.trim();
-      if (ssid) {
-        try {
-          const now = new Date().toISOString();
-          const { error } = await supabaseClient.from('user_network').upsert({
-            ssid: ssid,
-            ip_address: publicIP,
-            last_seen: now
-          }, { onConflict: ['ssid'] });
-          if (error) throw error;
-          ssidStatus.textContent = `✅ SSID "${ssid}" disimpan dengan IP ${publicIP}`;
-          ssidStatus.style.color = 'green';
-        } catch (err) {
-          console.error(err);
-          ssidStatus.textContent = `❌ Gagal simpan SSID: ${err.message}`;
-          ssidStatus.style.color = 'red';
-        }
-      }
+      alert("✅ Data jaringan berhasil disimpan ke Supabase!");
+    } catch (err) {
+      console.error("❌ Gagal ambil info jaringan:", err);
     }
-  </script>
-</body>
+  }
+
+  // Jalankan saat tombol diklik
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("fetchBtn").addEventListener("click", fetchNetworkInfo);
+  });
+</script>
 </html>
