@@ -87,23 +87,34 @@
       fetchBtn.disabled = true;
 
       try {
-        // Jalankan semua proses pengambilan data secara paralel
-        const [publicIPData, privateIPs, backendData] = await Promise.all([
+        // 1. Ambil IP publik dan privat secara bersamaan
+        const [publicIPData, privateIPs] = await Promise.all([
           fetch('https://ipinfo.io/json?token=7de3e574f56ab3').then(res => res.json()),
-          getPrivateIPsViaWebRTC(),
-          fetch('/api/network').then(res => res.json())
+          getPrivateIPsViaWebRTC()
         ]);
 
-        // Gabungkan hasil
+        const publicIP = publicIPData.ip || '';
+        const privateIP = privateIPs[0] || '';
+
+        // 2. Kirim data ke backend untuk diproses dan disimpan
+        // IP privat dan publik dikirim sebagai query parameter
+        const apiUrl = `/api/network?privateIp=${encodeURIComponent(privateIP)}&publicIp=${encodeURIComponent(publicIP)}`;
+        const backendData = await fetch(apiUrl).then(res => res.json());
+
+        if (backendData.error) {
+          throw new Error(backendData.message || 'Gagal mengambil data dari backend.');
+        }
+
+        // 3. Gabungkan hasil untuk ditampilkan di frontend
         const combinedData = {
-          publicIP: publicIPData.ip || 'Tidak terdeteksi',
+          publicIP: publicIP || 'Tidak terdeteksi',
           privateIPs: privateIPs,
           subnetMask: backendData.subnetMask || 'Tidak terdeteksi',
           gateway: backendData.defaultGateway || 'Tidak terdeteksi',
         };
 
         // Hitung Network ID
-        combinedData.networkId = calculateNetworkId(privateIPs[0] || backendData.ipv4, combinedData.subnetMask);
+        combinedData.networkId = calculateNetworkId(privateIP || backendData.ipv4, combinedData.subnetMask);
 
         renderResults(combinedData);
 

@@ -1,6 +1,12 @@
+const { createClient } = require('@supabase/supabase-js');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+
+// Initialize Supabase
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // CORS wrapper
 const allowCors = fn => async (req, res) => {
@@ -21,7 +27,7 @@ const allowCors = fn => async (req, res) => {
 // Parsing functions
 function parseIpconfig(output) {
   const result = {};
-  const reIPv4 = /IPv4 Address[\s.:]*([0-9.]+)(?:\([^)]+\))?/i;
+  const reIPv4 = /IPv4 Address[\s.:]*([0-9.]+)(?:[^)]+)?/i;
   const reMask = /Subnet Mask[\s.:]*([0-9.]+)/i;
   const reLeaseObt = /Lease Obtained[\s.:]*([^\r\n]+)/i;
   const reLeaseExp = /Lease Expires[\s.:]*([^\r\n]+)/i;
@@ -90,6 +96,8 @@ const handler = async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
 
   try {
+    let networkInfo;
+
     // In production (Vercel or other non-Windows), use enhanced client network info
     if (process.platform !== 'win32') {
       // Get network info from headers and query params
@@ -128,10 +136,10 @@ const handler = async (req, res) => {
         
         // Use client-provided DNS or fallback to gateway + Google DNS
         const dnsServers = clientInfo.dnsServers ? 
-          clientInfo.dnsServers.split(',') : 
+          clientInfo.dnsServers.split(',') :
           [defaultGateway, '8.8.8.8'];
         
-        return res.status(200).json({
+        networkInfo = {
           ssid: clientInfo.ssid || null,
           ipv4: rawIp,
           subnetMask,
@@ -145,76 +153,91 @@ const handler = async (req, res) => {
           leaseExpires: new Date(Date.now() + 24*60*60*1000).toISOString(), // +24h
           timestamp: new Date().toISOString(),
           note: 'Enhanced client network info from browser APIs'
-        });
+        };
+      } else {
+        // No valid IP detected
+        networkInfo = {
+          ssid: null,
+          ipv4: null,
+          subnetMask: null,
+          defaultGateway: null,
+          dhcpServer: null,
+          dnsServers: null,
+          connectionType: clientInfo.type || 'unknown',
+          signalStrength: null,
+          networkSpeed: null,
+          leaseObtained: null,
+          leaseExpires: null,
+          timestamp: new Date().toISOString(),
+          note: 'No valid client IPv4 detected'
+        };
       }
-      
-      // No valid IP detected
-      return res.status(200).json({
-        ssid: null,
-        ipv4: null,
-        subnetMask: null,
-        defaultGateway: null,
-        dhcpServer: null,
-        dnsServers: null,
-        connectionType: clientInfo.type || 'unknown',
-        signalStrength: null,
-        networkSpeed: null,
-        leaseObtained: null,
-        leaseExpires: null,
-        timestamp: new Date().toISOString(),
-        note: 'No valid client IPv4 detected'
-      });
+    } else {
+        // Execute both commands
+        let netshOutput = '';
+        let ipOutput = '';
+
+        try {
+          const { stdout: netshStdout } = await execAsync('netsh wlan show interfaces');
+          netshOutput = netshStdout;
+        } catch (err) {
+          console.warn('WLAN information not available:', err.message);
+          // Don't throw, continue without WLAN info
+        }
+
+        let ipInfo = {};
+        try {
+          const { stdout: ipStdout } = await execAsync('ipconfig /all');
+          ipOutput = ipStdout;
+          ipInfo = parseIpconfig(ipOutput);
+        } catch (err) {
+          console.error('Failed to get IP configuration:', err.message);
+          return res.status(500).json({
+            error: 'Command execution failed',
+            message: 'Failed to get network information',
+            details: err.message
+          });
+        }
+
+        // Ensure we have at least some data
+        if (!ipInfo.ipv4) {
+          return res.status(404).json({
+            error: 'No data',
+            message: 'No network adapter information found'
+          });
+        }
+
+        // Parse and combine the results
+        networkInfo = {
+          ssid: parseSSID(netshOutput) || null,
+          ipv4: ipInfo.ipv4 || null,
+          publicIp: req.query.publicIp || null, // Get public IP from query
+          subnetMask: ipInfo.subnetMask || null,
+          defaultGateway: ipInfo.defaultGateway || null,
+          dhcpServer: ipInfo.dhcpServer || null,
+          dnsServers: ipInfo.dnsServers || null,
+          connectionSpecificDnsSuffix: ipInfo.connectionSpecificDnsSuffix || null,
+          dhcpv6Iaid: ipInfo.dhcpv6Iaid || null,
+          dhcpv6ClientDuid: ipInfo.dhcpv6ClientDuid || null,
+          leaseObtained: ipInfo.leaseObtained || null,
+          leaseExpires: ipInfo.leaseExpires || null,
+          timestamp: new Date().toISOString(),
+          note: 'Data from local Windows commands.'
+        };
     }
 
-    // Execute both commands
-    let netshOutput = '';
-    let ipOutput = '';
+    // Save to Supabase
+    const { data, error } = await supabase
+      .from('network_info')
+      .insert([networkInfo]);
 
-    try {
-      const { stdout: netshStdout } = await execAsync('netsh wlan show interfaces');
-      netshOutput = netshStdout;
-    } catch (err) {
-      console.warn('WLAN information not available:', err.message);
-      // Don't throw, continue without WLAN info
-    }
-
-    let ipInfo = {};
-    try {
-      const { stdout: ipStdout } = await execAsync('ipconfig /all');
-      ipOutput = ipStdout;
-      ipInfo = parseIpconfig(ipOutput);
-    } catch (err) {
-      console.error('Failed to get IP configuration:', err.message);
+    if (error) {
+      console.error('Supabase error:', error);
       return res.status(500).json({
-        error: 'Command execution failed',
-        message: 'Failed to get network information',
-        details: err.message
+        error: 'Failed to save data to Supabase',
+        message: error.message
       });
     }
-
-    // Ensure we have at least some data
-    if (!ipInfo.ipv4) {
-      return res.status(404).json({
-        error: 'No data',
-        message: 'No network adapter information found'
-      });
-    }
-
-    // Parse and combine the results
-    const networkInfo = {
-      ssid: parseSSID(netshOutput) || null,
-      ipv4: ipInfo.ipv4 || null,
-      subnetMask: ipInfo.subnetMask || null,
-      defaultGateway: ipInfo.defaultGateway || null,
-      dhcpServer: ipInfo.dhcpServer || null,
-      dnsServers: ipInfo.dnsServers || null,
-      connectionSpecificDnsSuffix: ipInfo.connectionSpecificDnsSuffix || null,
-      dhcpv6Iaid: ipInfo.dhcpv6Iaid || null,
-      dhcpv6ClientDuid: ipInfo.dhcpv6ClientDuid || null,
-      leaseObtained: ipInfo.leaseObtained || null,
-      leaseExpires: ipInfo.leaseExpires || null,
-      timestamp: new Date().toISOString()
-    };
 
     res.status(200).json(networkInfo);
   } catch (error) {
