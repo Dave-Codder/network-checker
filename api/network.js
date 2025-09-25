@@ -170,7 +170,29 @@ const handler = async (req, res) => {
         };
     }
 
-    const { data, error } = await supabase.from('network_info').insert([networkInfo]);
+    // Map to snake_case for Supabase insertion
+    const snakeCaseNetworkInfo = {
+      ssid: networkInfo.ssid,
+      ipv4: networkInfo.ipv4,
+      public_ip: networkInfo.publicIp,
+      subnet_mask: networkInfo.subnetMask,
+      default_gateway: networkInfo.defaultGateway,
+      network_id: networkInfo.networkId,
+      dhcp_server: networkInfo.dhcpServer,
+      dns_servers: networkInfo.dnsServers,
+      connection_type: networkInfo.connectionType,
+      signal_strength: networkInfo.signalStrength,
+      network_speed: networkInfo.networkSpeed,
+      lease_obtained: networkInfo.leaseObtained,
+      lease_expires: networkInfo.leaseExpires,
+      timestamp: networkInfo.timestamp,
+      note: networkInfo.note,
+      connection_specific_dns_suffix: networkInfo.connectionSpecificDnsSuffix,
+      dhcpv6_iaid: networkInfo.dhcpv6Iaid,
+      dhcpv6_client_duid: networkInfo.dhcpv6ClientDuid
+    };
+
+    const { data, error } = await supabase.from('network_info').insert([snakeCaseNetworkInfo]);
 
     if (error) {
       console.error('Supabase error:', error);
